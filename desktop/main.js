@@ -77,6 +77,19 @@ ipcMain.handle('daemon:stop', async () => {
   return { running: false, message: (r.out || r.err || 'stopped').trim() }
 })
 
+/** 手动添加运行时：CLI 会探测本机是否安装，未安装则非 0 退出。 */
+ipcMain.handle('runtime:add', async (_evt, provider) => {
+  const r = await runCli(['runtime', 'add', '--provider', String(provider || '')])
+  const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '注册失败')
+  return { ok: r.code === 0, message }
+})
+
+ipcMain.handle('runtime:remove', async (_evt, provider) => {
+  const r = await runCli(['runtime', 'remove', '--provider', String(provider || '')])
+  const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '移除失败')
+  return { ok: r.code === 0, message }
+})
+
 app.whenReady().then(() => {
   createWindow()
   app.on('activate', () => {

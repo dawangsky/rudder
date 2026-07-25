@@ -14,7 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Run 常驻循环：注册 Runtime、心跳、领任务、执行、上报。
+// Run 常驻循环：仅为「已手动添加」的 Provider 注册 Runtime、心跳、领任务。
+// 不再自动探测全量 CLI 并注册——本机装了也不展示，除非用户先添加。
 func Run(serverOverride string) error {
 	creds, err := config.LoadCredentials()
 	if err != nil {
@@ -27,9 +28,21 @@ func Run(serverOverride string) error {
 	api := client.New(base, creds.DaemonToken)
 	daemonID := uuid.NewString()
 	host, _ := os.Hostname()
-	providers := detect.DetectProviders()
+
+	enabled, err := config.LoadEnabledProviders()
+	if err != nil {
+		return err
+	}
+	if len(enabled) == 0 {
+		fmt.Println("尚未添加任何运行时。请在 Desktop「运行时」页添加，或执行: rudder runtime add --provider cursor")
+	}
+
 	runtimeIDs := map[string]string{}
-	for _, p := range providers {
+	for _, p := range enabled {
+		if err := detect.RequireInstalled(p); err != nil {
+			fmt.Printf("skip provider=%s: %v\n", p, err)
+			continue
+		}
 		rt, err := api.RegisterRuntime(daemonID, p, host)
 		if err != nil {
 			return fmt.Errorf("register runtime %s: %w", p, err)
@@ -45,8 +58,10 @@ func Run(serverOverride string) error {
 	fmt.Println("daemon running; poll=3s heartbeat=15s; Ctrl+C to stop")
 	tickPoll := time.NewTicker(3 * time.Second)
 	tickHB := time.NewTicker(15 * time.Second)
+	tickSync := time.NewTicker(10 * time.Second)
 	defer tickPoll.Stop()
 	defer tickHB.Stop()
+	defer tickSync.Stop()
 
 	for {
 		select {
@@ -54,6 +69,9 @@ func Run(serverOverride string) error {
 			for _, id := range runtimeIDs {
 				_ = api.Heartbeat(id)
 			}
+		case <-tickSync.C:
+			// 热加载本机已添加列表（UI/CLI 新增后无需重启 Daemon）
+			syncEnabled(api, daemonID, host, runtimeIDs)
 		case <-tickPoll.C:
 			for prov, id := range runtimeIDs {
 				claim, err := api.Claim(id)
@@ -62,6 +80,36 @@ func Run(serverOverride string) error {
 				}
 				go handleClaim(api, prov, claim)
 			}
+		}
+	}
+}
+
+func syncEnabled(api *client.API, daemonID, host string, runtimeIDs map[string]string) {
+	enabled, err := config.LoadEnabledProviders()
+	if err != nil {
+		return
+	}
+	want := map[string]bool{}
+	for _, p := range enabled {
+		want[p] = true
+		if _, ok := runtimeIDs[p]; ok {
+			continue
+		}
+		if err := detect.RequireInstalled(p); err != nil {
+			fmt.Printf("skip provider=%s: %v\n", p, err)
+			continue
+		}
+		rt, err := api.RegisterRuntime(daemonID, p, host)
+		if err != nil {
+			fmt.Printf("register runtime %s failed: %v\n", p, err)
+			continue
+		}
+		runtimeIDs[p] = fmt.Sprint(rt["id"])
+		fmt.Printf("registered runtime provider=%s id=%s\n", p, runtimeIDs[p])
+	}
+	for p := range runtimeIDs {
+		if !want[p] {
+			delete(runtimeIDs, p)
 		}
 	}
 }
@@ -86,6 +134,9 @@ func handleClaim(api *client.API, providerName string, claim map[string]any) {
 	instructions := fmt.Sprint(agent["instructions"])
 	prompt := fmt.Sprint(task["prompt"])
 	agentProvider := fmt.Sprint(agent["provider"])
+	if agentProvider == "" {
+		agentProvider = providerName
+	}
 
 	unlock := func() {}
 	if localMode {

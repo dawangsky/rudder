@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newDaemonCmd())
+	rootCmd.AddCommand(newRuntimeCmd())
 }
 
 func newVersionCmd() *cobra.Command {

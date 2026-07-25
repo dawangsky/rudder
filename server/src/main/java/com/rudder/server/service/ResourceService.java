@@ -61,6 +61,14 @@ public class ResourceService {
         a.setDescription(str(body.get("description")));
         a.setInstructions(str(body.get("instructions")));
         a.setProvider(provider.toLowerCase());
+        // 须先在「运行时」手动添加且当前在线，才允许创建该 Provider 的智能体
+        boolean runtimeOnline = listRuntimes(p).stream().anyMatch(r ->
+                provider.equalsIgnoreCase(String.valueOf(r.get("provider")))
+                        && "online".equals(String.valueOf(r.get("status"))));
+        if (!runtimeOnline) {
+            throw new IllegalArgumentException(
+                    "运行时「" + provider + "」未添加或不在线。请先到「运行时」页添加（本机须已安装对应 CLI）");
+        }
         a.setRuntimeId(asLong(body.get("runtimeId")));
         a.setMaxConcurrency(body.get("maxConcurrency") == null ? 1 : ((Number) body.get("maxConcurrency")).intValue());
         a.setStatus("idle");
@@ -210,6 +218,9 @@ public class ResourceService {
     }
 
     // -------- Runtime --------
+    /** 心跳超过该秒数视为离线（展示用）。 */
+    private static final long RUNTIME_OFFLINE_AFTER_SECONDS = 45;
+
     public List<Map<String, Object>> listRuntimes(AuthPrincipal p) {
         return runtimeMapper.selectList(new LambdaQueryWrapper<RuntimeEntity>()
                         .eq(RuntimeEntity::getWorkspaceId, p.workspaceId())
@@ -217,12 +228,17 @@ public class ResourceService {
                 .stream().map(this::runtimeView).collect(Collectors.toList());
     }
 
+    /**
+     * Daemon 注册/刷新 Runtime：同一工作区同一 Provider 只保留一条（手动添加模型）。
+     */
     @Transactional
     public Map<String, Object> upsertRuntime(Long workspaceId, String daemonId, String provider,
                                              String hostName, String metaJson) {
+        if (!WorkdirResolver.isAllowedProvider(provider)) {
+            throw new IllegalArgumentException("不支持的 Provider: " + provider);
+        }
         RuntimeEntity existing = runtimeMapper.selectOne(new LambdaQueryWrapper<RuntimeEntity>()
                 .eq(RuntimeEntity::getWorkspaceId, workspaceId)
-                .eq(RuntimeEntity::getDaemonId, daemonId)
                 .eq(RuntimeEntity::getProvider, provider)
                 .last("LIMIT 1"));
         LocalDateTime now = LocalDateTime.now();
@@ -239,6 +255,7 @@ public class ResourceService {
             existing.setUpdatedAt(now);
             runtimeMapper.insert(existing);
         } else {
+            existing.setDaemonId(daemonId);
             existing.setHostName(hostName);
             existing.setStatus("online");
             existing.setLastHeartbeatAt(now);
@@ -248,6 +265,16 @@ public class ResourceService {
         }
         wsHub.publish(workspaceId, Map.of("type", "runtime.updated", "runtime", runtimeView(existing)));
         return runtimeView(existing);
+    }
+
+    @Transactional
+    public void deleteRuntime(AuthPrincipal p, Long id) {
+        RuntimeEntity r = runtimeMapper.selectById(id);
+        if (r == null || !Objects.equals(r.getWorkspaceId(), p.workspaceId())) {
+            throw new IllegalArgumentException("运行时不存在");
+        }
+        runtimeMapper.deleteById(id);
+        wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(id)));
     }
 
     public void heartbeat(Long runtimeId) {
@@ -265,7 +292,12 @@ public class ResourceService {
         m.put("daemonId", r.getDaemonId());
         m.put("provider", r.getProvider());
         m.put("hostName", r.getHostName());
-        m.put("status", r.getStatus());
+        String status = r.getStatus();
+        if (r.getLastHeartbeatAt() != null
+                && r.getLastHeartbeatAt().isBefore(LocalDateTime.now().minusSeconds(RUNTIME_OFFLINE_AFTER_SECONDS))) {
+            status = "offline";
+        }
+        m.put("status", status);
         m.put("lastHeartbeatAt", r.getLastHeartbeatAt() == null ? null : r.getLastHeartbeatAt().toString());
         return m;
     }

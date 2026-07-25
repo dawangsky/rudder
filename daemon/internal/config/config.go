@@ -12,12 +12,24 @@ type Credentials struct {
 	DaemonToken string `json:"daemonToken"`
 }
 
-func LoadCredentials() (*Credentials, error) {
+func RudderHome() (string, error) {
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".rudder")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func LoadCredentials() (*Credentials, error) {
+	dir, err := RudderHome()
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(home, ".rudder", "credentials.json")
+	path := filepath.Join(dir, "credentials.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -30,11 +42,9 @@ func LoadCredentials() (*Credentials, error) {
 }
 
 func PidPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := RudderHome()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".rudder")
-	_ = os.MkdirAll(dir, 0o700)
 	return filepath.Join(dir, "daemon.pid"), nil
 }

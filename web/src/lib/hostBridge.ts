@@ -5,10 +5,18 @@ export type DaemonStatus = {
   message: string
 }
 
+export type RuntimeActionResult = {
+  ok: boolean
+  message: string
+}
+
 type HostBridgeApi = {
   getDaemonStatus: () => Promise<DaemonStatus>
   startDaemon: () => Promise<DaemonStatus>
   stopDaemon: () => Promise<DaemonStatus>
+  /** 探测本机 CLI 并注册运行时；未安装则 ok=false */
+  addRuntime: (provider: string) => Promise<RuntimeActionResult>
+  removeRuntime: (provider: string) => Promise<RuntimeActionResult>
 }
 
 declare global {
@@ -17,7 +25,7 @@ declare global {
   }
 }
 
-/** 获取宿主桥；纯浏览器预览时返回 stub。 */
+/** 获取宿主桥；纯浏览器预览时返回 stub（需用 CLI 添加运行时）。 */
 export function getHostBridge(): HostBridgeApi {
   if (window.rudderHost) return window.rudderHost
   return {
@@ -29,6 +37,18 @@ export function getHostBridge(): HostBridgeApi {
     },
     async stopDaemon() {
       return { running: false, message: '非 Desktop 环境' }
+    },
+    async addRuntime(provider: string) {
+      return {
+        ok: false,
+        message: `非 Desktop 环境：请执行 rudder runtime add --provider ${provider}`,
+      }
+    },
+    async removeRuntime(provider: string) {
+      return {
+        ok: false,
+        message: `非 Desktop 环境：请执行 rudder runtime remove --provider ${provider}`,
+      }
     },
   }
 }

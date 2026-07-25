@@ -19,7 +19,7 @@ func newDaemonCmd() *cobra.Command {
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "start",
-		Short: "启动 Daemon：探测 CLI、注册 Runtime、轮询领任务",
+		Short: "启动 Daemon：仅为已添加的运行时心跳与领任务",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return daemon.Run(serverBaseURL)
 		},
