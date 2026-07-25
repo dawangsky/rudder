@@ -21,6 +21,10 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // 浏览器 CORS 预检（OPTIONS）无 Authorization，必须放行，否则前端会报跨域失败
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (header == null || !header.startsWith("Bearer ")) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
