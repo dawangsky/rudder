@@ -28,6 +28,13 @@ const error = ref('')
 const loading = ref(false)
 
 onMounted(() => {
+  // 切换账号进入时不回填旧账号
+  if (route.query.switch === '1') {
+    email.value = ''
+    password.value = ''
+    remember.value = false
+    return
+  }
   const saved = loadRememberedAuth()
   if (saved) {
     email.value = saved.email

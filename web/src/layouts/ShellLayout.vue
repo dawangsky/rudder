@@ -3,11 +3,14 @@ import { onMounted, ref, computed } from 'vue'
 import { getHostBridge } from '@/lib/hostBridge'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
+import { clearRememberedAuth } from '@/lib/rememberAuth'
+import { clearSession, getSessionEmail } from '@/lib/session'
 
 const route = useRoute()
 const router = useRouter()
 const daemonMsg = ref('')
 const unread = ref(0)
+const userEmail = ref(getSessionEmail())
 
 const navItems = [
   { path: '/chat', label: '对话' },
@@ -45,7 +48,21 @@ async function loadUnread() {
   }
 }
 
+/** 退出：清会话，保留「记住账号密码」，回到登录页。 */
+async function logout() {
+  clearSession()
+  await router.replace({ name: 'login' })
+}
+
+/** 切换账号：清会话 + 清记住的账号密码，便于登录另一邮箱。 */
+async function switchAccount() {
+  clearSession()
+  clearRememberedAuth()
+  await router.replace({ name: 'login', query: { switch: '1' } })
+}
+
 onMounted(() => {
+  userEmail.value = getSessionEmail()
   refreshDaemon()
   loadUnread()
   setInterval(loadUnread, 15000)
@@ -73,6 +90,13 @@ function go(path: string) {
           <span v-if="item.path === '/inbox' && unread" class="badge">{{ unread }}</span>
         </button>
       </nav>
+      <div class="account-box">
+        <div class="muted small email" :title="userEmail">{{ userEmail || '未登录' }}</div>
+        <div class="row">
+          <button type="button" class="mini" @click="switchAccount">切换账号</button>
+          <button type="button" class="mini" @click="logout">退出</button>
+        </div>
+      </div>
       <div class="daemon-box">
         <div class="muted small">{{ daemonMsg }}</div>
         <div class="row">
@@ -96,8 +120,17 @@ function go(path: string) {
   padding: 0 6px;
   font-size: 12px;
 }
-.daemon-box {
+.account-box {
   margin-top: auto;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+.account-box .email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.daemon-box {
   padding: 10px;
   border-top: 1px solid var(--border);
 }
@@ -110,5 +143,6 @@ function go(path: string) {
   border-radius: 6px;
   padding: 6px;
   cursor: pointer;
+  font-size: 12px;
 }
 </style>
