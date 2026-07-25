@@ -72,3 +72,8 @@ func (a *API) Claim(runtimeID string) (map[string]any, error) {
 func (a *API) Report(taskID string, body map[string]any) error {
 	return a.do(http.MethodPost, "/api/daemon/tasks/"+taskID+"/report", body, nil)
 }
+
+// DeleteRuntimeByProvider 从控制面删除该 Provider 的运行时记录。
+func (a *API) DeleteRuntimeByProvider(provider string) error {
+	return a.do(http.MethodDelete, "/api/daemon/runtimes/provider/"+provider, nil, nil)
+}

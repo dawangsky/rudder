@@ -109,7 +109,9 @@ func syncEnabled(api *client.API, daemonID, host string, runtimeIDs map[string]s
 	}
 	for p := range runtimeIDs {
 		if !want[p] {
+			_ = api.DeleteRuntimeByProvider(p)
 			delete(runtimeIDs, p)
+			fmt.Printf("unregistered runtime provider=%s\n", p)
 		}
 	}
 }

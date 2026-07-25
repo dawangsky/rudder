@@ -277,6 +277,21 @@ public class ResourceService {
         wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(id)));
     }
 
+    /** 按 Provider 删除当前工作区运行时（移除时避免 Daemon 再次注册后列表「删不掉」）。 */
+    @Transactional
+    public void deleteRuntimeByProvider(AuthPrincipal p, String provider) {
+        if (!StringUtils.hasText(provider)) {
+            throw new IllegalArgumentException("provider 不能为空");
+        }
+        List<RuntimeEntity> list = runtimeMapper.selectList(new LambdaQueryWrapper<RuntimeEntity>()
+                .eq(RuntimeEntity::getWorkspaceId, p.workspaceId())
+                .eq(RuntimeEntity::getProvider, provider.toLowerCase()));
+        for (RuntimeEntity r : list) {
+            runtimeMapper.deleteById(r.getId());
+            wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(r.getId())));
+        }
+    }
+
     public void heartbeat(Long runtimeId) {
         RuntimeEntity r = runtimeMapper.selectById(runtimeId);
         if (r == null) return;

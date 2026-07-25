@@ -84,6 +84,12 @@ public class ApiControllers {
         return Map.of("ok", true);
     }
 
+    @DeleteMapping("/runtimes/provider/{provider}")
+    public Map<String, Object> deleteRuntimeByProvider(@PathVariable String provider) {
+        resourceService.deleteRuntimeByProvider(session(), provider);
+        return Map.of("ok", true);
+    }
+
     // Chat
     @GetMapping("/chats")
     public List<Map<String, Object>> chats() { return orchestrationService.listSessions(session()); }
@@ -161,6 +167,12 @@ public class ApiControllers {
                 String.valueOf(body.getOrDefault("hostName", "")),
                 String.valueOf(body.getOrDefault("metaJson", "{}"))
         );
+    }
+
+    @DeleteMapping("/daemon/runtimes/provider/{provider}")
+    public Map<String, Object> deleteDaemonRuntime(@PathVariable String provider) {
+        resourceService.deleteRuntimeByProvider(daemon(), provider);
+        return Map.of("ok", true);
     }
 
     @PostMapping("/daemon/heartbeat")

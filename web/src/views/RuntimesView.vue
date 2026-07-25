@@ -54,9 +54,27 @@ async function addRuntime() {
 
 async function removeRuntime(r: Runtime) {
   err.value = ''
+  okMsg.value = ''
   try {
-    await getHostBridge().removeRuntime(r.provider)
-    await apiFetch(`/api/runtimes/${r.id}`, { method: 'DELETE' })
+    const res = await getHostBridge().removeRuntime(r.provider)
+    if (!res.ok) {
+      // Desktop CLI 失败时仍尝试删服务端，避免只清一半
+      try {
+        await apiFetch(`/api/runtimes/provider/${encodeURIComponent(r.provider)}`, { method: 'DELETE' })
+      } catch {
+        /* ignore */
+      }
+      err.value = res.message || '移除失败'
+      await load()
+      return
+    }
+    // CLI 已删服务端；再按 id 删一次保证幂等
+    try {
+      await apiFetch(`/api/runtimes/${r.id}`, { method: 'DELETE' })
+    } catch {
+      /* 可能已被 CLI 删除 */
+    }
+    okMsg.value = '已移除'
     await load()
   } catch (e) {
     err.value = e instanceof Error ? e.message : '移除失败'
