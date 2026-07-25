@@ -31,10 +31,10 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 cd server
 
-# 复制本地配置并填写 MySQL/Redis（见 application-local.yml.example）
+# 复制本地配置并填写 MySQL/Redis（见 application-local.yml.example；勿提交真实密码）
 cp src/main/resources/application-local.yml.example src/main/resources/application-local.yml
 
-# 开发启动
+# 在 server/ 下执行 mvn 会自动使用本仓库 .mvn/settings（不影响其它项目的 settings）
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 # 或打包后运行
@@ -43,6 +43,8 @@ java -jar target/rudder-server-*.jar --spring.profiles.active=local
 ```
 
 默认 HTTP 端口：`8080`（可在配置中修改）。
+
+Maven 多 settings 说明见 [`server/.mvn/settings/README.md`](server/.mvn/settings/README.md)。
 
 ## Web + Desktop
 

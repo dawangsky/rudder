@@ -1,14 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 本仓库专用 Maven 设置：绕过不可达的公司私服，使用阿里云 / Maven Central -->
+<!--
+  可选示例：若需在本仓库临时走公司 Nexus，复制为 company-nexus.xml 并改 URL，
+  再把 .mvn/maven.config 里的 -gs/-s 指向该文件。
+  仍然只影响本仓库，不影响其它项目的全局 settings。
+-->
 <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
   <localRepository>${user.home}/.m2/repository</localRepository>
   <mirrors>
     <mirror>
-      <id>aliyun-central</id>
-      <name>Aliyun Maven</name>
-      <url>https://maven.aliyun.com/repository/central</url>
+      <id>company-nexus</id>
+      <name>Company Nexus</name>
+      <url>http://YOUR_NEXUS_HOST/repository/public/</url>
       <mirrorOf>*</mirrorOf>
     </mirror>
   </mirrors>
