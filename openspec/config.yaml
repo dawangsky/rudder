@@ -1,0 +1,31 @@
+schema: spec-driven
+
+# Project context — shown to AI when creating artifacts
+context: |
+  Product: Rudder — local Agent orchestration (Multica-class).
+  Repo: monorepo planned as server/ (Java), daemon+cli (Go), web/ (Vue3), desktop/ (Electron).
+  Server: JDK 21 + Spring Boot 3 + MyBatis-Plus + MySQL + Redis; WebSocket via Netty 4.x.
+  Daemon/CLI: Go; Self-Host; Java command to run server (no Docker Compose in MVP).
+  MVP client: Desktop (Electron loads web/); no standalone browser product.
+  Providers: Cursor, Claude Code, Codex (detect locally).
+  Auth: email register/login. Product: single-user single workspace; schema multi-tenant ready.
+  Workdir: project local path > sandbox ~/rudder_workspaces/{ws}/{task}/workdir/.
+  Chat requires Agent first; UI Chinese light theme; Multica-inspired; default route Chat.
+  Never invent MySQL/Redis credentials — ask the user.
+  Process: OpenSpec before code; local git commit per requirement/code change.
+  PRD: docs/PRD-agent-orchestration-platform.md (background); openspec/ is source of truth for behavior.
+  Language for specs/docs: Chinese preferred for product wording; technical IDs in English kebab-case.
+
+rules:
+  proposal:
+    - Include Non-goals / Out of Scope pointing to PRD §9.1.1
+    - Keep Why/What concise; details in design
+  specs:
+    - Use SHALL requirements with concrete WHEN/THEN scenarios
+    - Write requirement names and scenarios in Chinese where product-facing
+  design:
+    - Cover monorepo layout, Netty WS, workdir resolution, Provider adapters
+    - Note MySQL/Redis config must come from user
+  tasks:
+    - Order: scaffolding → server auth → daemon → UI shell → P0 triggers
+    - No task should require inventing DB passwords

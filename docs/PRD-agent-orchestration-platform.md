@@ -1,13 +1,15 @@
-# PRD：Agent 协作编排平台（Multica 类）
+# PRD：Rudder — Agent 协作编排平台（Multica 类）
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.1 |
-| 状态 | 草案 |
+| 文档版本 | v0.2 |
+| 状态 | 需求已锁定（开放问题已关闭） |
 | 创建日期 | 2026-07-25 |
-| 产品暂定名 | **AgentBoard**（可改） |
+| 更新日期 | 2026-07-25 |
+| 产品正式名 | **Rudder** |
 | 对标产品 | Multica |
-| 文档目标 | 明确架构组成、功能模块、MVP 范围与分期，作为研发与设计的统一输入 |
+| 文档目标 | 明确架构组成、功能模块、MVP 范围与分期；可执行需求以 OpenSpec 为准 |
+| 研发流程 | OpenSpec（proposal → specs → design → tasks → apply → archive） |
 
 ---
 
@@ -101,34 +103,45 @@ AI Coding Agent（Claude Code、Codex、Cursor Agent 等）能力快速提升，
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 3.3 推荐技术栈（可调整）
+### 3.3 已定技术栈
 
-| 层 | 推荐 | 说明 |
+| 层 | 选型 | 说明 |
 |---|---|---|
-| Server | Go（或 Java，若团队更熟） | 任务队列、WS、权限；Go 更利于同仓维护 daemon |
-| Daemon / CLI | Go | 单二进制、并发领任务、跨平台分发 |
-| Web | Next.js 或 Vue 3 | 看板与实时协作 UI |
-| Desktop | Electron 薄壳（首选）或 Tauri | 只负责窗口 + 拉起/监控 daemon，不承载执行 |
-| DB | PostgreSQL | Issue、任务、成员、技能等 |
-| 实时 | WebSocket（+ 可选 Redis 做多节点 fanout） | 评论流、任务进度、Inbox |
+| Server | JDK 21 + Spring Boot 3 + MyBatis-Plus + MySQL + Redis | 控制面；Java 命令启动，第一期不做 Docker Compose |
+| 实时 | WebSocket（**Netty 4.x**） | 评论流、任务进度、Inbox；Redis 可用于后续多节点 |
+| Daemon / CLI | Go | 单二进制；login / daemon / 基础操作 |
+| 前端本体 | Vue 3（目录 `web/`） | 业务 UI；可被 Electron 加载，便于二期独立 Web |
+| Desktop | Electron 薄壳（目录 `desktop/`） | **第一期主客户端**；窗口 + 拉起/监控 daemon，不承载执行 |
+| 平台 | 第一期 **macOS** | Windows 二期；Linux 正式支持列入后续 |
 
-> 与对标一致的关键点：**Daemon 独立于窗口**；桌面用不用 Electron 是体验选择，不是架构核心。
+> 关键点：**Daemon 独立于窗口**；独立浏览器 Web **不做第一期产品形态**（代码仍放 `web/`）。
 
 ### 3.4 核心对象模型
 
 | 对象 | 含义 |
 |---|---|
-| Workspace | 多租户边界：成员、Issue、Agent、Skill 均归属工作区 |
-| Member | 人类成员（角色：owner/admin/member） |
-| Agent | 带身份的 AI 工作者（人设、Instructions、Provider、Runtime、Skills） |
+| Workspace | 多租户边界：成员、Issue、Agent、Skill、Project 均归属工作区（**表结构按多人多工作区设计**；MVP 产品仅单人单工作区） |
+| Member | 人类成员（角色：owner/admin/member；MVP 简化） |
+| Project | 可选业务容器；可配置本机绝对路径作为 Agent 工作目录（**项目路径优先于默认沙箱**） |
+| Agent | 带身份的 AI 工作者（Instructions、Provider、Runtime、Skills）；**开 Chat 前必须先创建** |
 | Runtime | `Daemon × 某款 Agent CLI`（一台机器可注册多个） |
-| Issue | 工作单元；可指派给人/Agent |
+| Issue | 工作单元；可指派给人/Agent；可归属 Project |
 | Comment | Issue 下讨论；`@Agent` 触发任务 |
-| Chat Session | 不依附 Issue 的私聊；每条用户消息可触发任务 |
+| Chat Session | 选择已有 Agent 后创建；可归属 Project；每条用户消息可触发任务 |
 | Task | 一次执行实例（queued → dispatched → running → completed/failed/cancelled） |
 | Skill | 可复用 SOP/说明，任务启动前注入工作目录 |
-| Autopilot | 定时/Webhook 自动创建 Issue 或直接跑 Task |
+| Autopilot | 定时/Webhook（二期） |
 | Inbox | 个人通知中心（被指派、被 @、任务完成等） |
+
+### 3.4.1 Agent 工作目录（对齐 Multica）
+
+**优先级（高 → 低）**
+
+1. Chat/Issue 归属 Project 且 Project 配置了本机路径 → 使用该路径  
+2. 否则使用默认沙箱：`{RUDDER_WORKSPACES_ROOT|~/rudder_workspaces}/{workspace_id}/{task_id}/workdir/`
+
+- 项目路径模式下：`output/` / `logs/` 仍落在沙箱 env 根；**永不删除用户项目目录**  
+- 同一真实本地路径上的任务 **串行加锁**
 
 ### 3.5 任务生命周期
 
@@ -148,18 +161,19 @@ AI Coding Agent（Claude Code、Codex、Cursor Agent 等）能力快速提升，
 ## 4. 功能模块总览
 
 ```text
-AgentBoard
-├── 1. 账号与工作区
-├── 2. Issue 协作（看板核心）
-├── 3. Agent 管理
-├── 4. Runtime / Daemon
-├── 5. 任务执行引擎
-├── 6. Chat
-├── 7. Skill
-├── 8. Autopilot（二期）
-├── 9. Inbox 与通知
-├── 10. CLI / Desktop 客户端
-└── 11. 系统设置与安全
+Rudder
+├── 1. 账号与工作区（MVP 单人单工作区；表结构预留多人）
+├── 2. Issue 协作（列表 + 简单看板）
+├── 3. Agent 管理（Provider + Instructions）
+├── 4. Project（本地路径 / 工作目录优先级）
+├── 5. Runtime / Daemon
+├── 6. 任务执行引擎
+├── 7. Chat（须先选 Agent）
+├── 8. Skill
+├── 9. Autopilot（二期）
+├── 10. Inbox 与通知
+├── 11. CLI / Desktop 客户端
+└── 12. 系统设置与安全
 ```
 
 ---
@@ -172,10 +186,12 @@ AgentBoard
 
 | 功能 | 说明 | MVP |
 |---|---|---|
-| 注册 / 登录 | 邮箱密码或 OAuth；支持 PAT / Daemon Token | ✅ |
-| 工作区 CRUD | 创建、切换、邀请成员 | ✅ |
-| 角色权限 | owner / admin / member | ✅ 简化版 |
-| Workspace Context | 工作区级系统提示，注入所有 Agent | 二期 |
+| 注册 / 登录 | **邮箱注册 + 登录**；支持 PAT / Daemon Token | ✅ |
+| 工作区 | 注册后自动创建/进入默认工作区（单人单工作区产品流程） | ✅ |
+| 表结构预留 | 成员、多工作区、角色字段预留，便于二期邀请协作 | ✅ 结构 / 二期产品 |
+| 角色权限 | owner / admin / member | 简化；二期精细化 |
+| OAuth / SSO | | 二期及以后 |
+| Workspace Context | 工作区级系统提示 | 二期 |
 | 仓库白名单 | Agent 仅可访问配置的 Git 仓库 | 二期 |
 
 ### 5.2 Issue 协作（产品灵魂载体）
@@ -206,14 +222,16 @@ AgentBoard
 
 | 功能 | 说明 | MVP |
 |---|---|---|
-| Agent CRUD | 名称、头像、描述、Instructions | ✅ |
-| 绑定 Provider | 先支持 1～2 个（建议 Claude Code + Codex 或 Cursor Agent） | ✅ |
+| Agent CRUD | 名称、头像、描述、**Instructions（可限定领域）** | ✅ |
+| 绑定 Provider | **Cursor / Claude Code / Codex**；本机探测，未装则提示 | ✅ |
 | 绑定 Runtime | 选择在哪台在线机器跑 | ✅ |
 | 挂载 Skills | 多选 Skill | ✅ |
 | 并发上限 | 每 Agent 最大并行 Task | ✅ 简单配置 |
 | 状态展示 | idle / working / offline / error | ✅ |
 | MCP / 自定义 Env/Args | 高级能力 | 二期 |
 | 可见性 private/workspace | | 二期 |
+
+**约束**：用户必须先创建 Agent，才能新建 Chat；创建时指定 Provider 与可选 Instructions。
 
 ### 5.4 Runtime / Daemon
 
@@ -252,23 +270,29 @@ AgentBoard
 
 ### 5.6 Chat
 
-**目标**：不建 Issue 也能对话驱动 Agent（你最看重的入口之一）。
+**目标**：不建 Issue 也能对话驱动 Agent（默认首页入口）。
 
 | 功能 | 说明 | MVP |
 |---|---|---|
-| 创建会话 | 选择 Agent 开聊 | ✅ |
+| 前置条件 | **必须先创建 Agent**；无 Agent 时引导至 Agents 页 | ✅ |
+| 新建会话 | 「新建聊天」→ **下拉选择已创建 Agent** | ✅ |
+| 会话内展示 | 对话界面展示当前绑定的智能体 | ✅ |
 | 发消息即触发 Task | 每条用户消息入队 | ✅ **P0** |
-| 流式回复展示 | WS 推送 | ✅ |
+| 流式回复展示 | WebSocket（Netty 4.x）推送 | ✅ |
+| 关联 Project | 可选；有项目本地路径时工作目录走项目路径 | ✅ |
 | 会话列表 / 归档 | | ✅ 列表；归档二期 |
 | 从 Chat 一键生成 Issue | 把结论沉淀为正式任务 | 二期 |
 
-**与 Issue 评论的差异（产品需写清）**
+**布局**：左侧会话列表 + 右侧对话区（顶栏展示当前 Agent）。
+
+**与 Issue 评论的差异**
 
 | | Chat | Issue 评论 |
 |---|---|---|
 | 可见性 | 偏个人与 Agent | 工作区协作可见 |
 | 触发 | 每条消息 | 需 @ 或指派 |
 | 用途 | 探索、草稿、轻量请求 | 正式工作推进 |
+| 入口 | 默认登录后进入 | Issues 导航 |
 
 ### 5.7 Skill
 
@@ -305,9 +329,16 @@ AgentBoard
 
 | 客户端 | MVP | 说明 |
 |---|---|---|
-| Web | ✅ | 主交互面 |
-| CLI | ✅ | 登录 + daemon + 基础 issue/agent 操作 |
-| Desktop | 二期 | Electron 薄壳；**不替代 daemon** |
+| Desktop（Electron + `web/` Vue3） | ✅ | **主交互面**；中文浅色；左侧导航；视觉参考 Multica |
+| CLI（Go） | ✅ | 登录 + daemon + 基础操作；可配 Self-Host Server 地址 |
+| 独立浏览器 Web | 二期 | 复用 `web/` 部署；第一期不上线 |
+
+### 5.10.1 Desktop UI 壳（MVP）
+
+- 左侧常驻导航：Issues / Chat / Agents / Skills / Runtimes / Inbox / Settings  
+- 登录后默认进入 **Chat**  
+- Issue：列表 + 简单看板  
+- 语言中文；主题浅色  
 
 ### 5.11 安全与合规
 
@@ -337,11 +368,12 @@ AgentBoard
 ### 7.1 首次开通（Onboarding）
 
 ```text
-注册登录 → 创建/加入 Workspace
-→ 本机安装 CLI 并 login
+注册登录（邮箱）→ 进入默认 Workspace
+→ 本机安装 CLI，配置 Self-Host Server 地址并 login
 → daemon start（探测 CLI，注册 Runtime）
-→ 创建第一个 Agent 并绑定 Runtime
-→ 创建 Demo Issue 并指派 → 看到执行与回贴
+→ 创建第一个 Agent（选 Provider + Instructions）并绑定 Runtime
+→ 打开 Chat（默认首页）→ 新建聊天下拉选 Agent → 发消息看到执行与回复
+→（可选）创建 Project 配本地路径 / 创建 Issue 指派验证
 ```
 
 ### 7.2 「说话即派活」主路径
@@ -368,8 +400,8 @@ AgentBoard
 | 扩展性 | Provider 以适配器接入，新增 CLI 不改核心队列 |
 | 可观测 | Task 全链路状态可查；Daemon 日志可 `logs -f` |
 | 安全 | 最小权限 Token；工作目录隔离；敏感环境变量保护 |
-| 兼容 | macOS / Linux 优先；Windows 二期 |
-| 部署 | 支持 Cloud（官方托管）与 Self-Host（Docker Compose） |
+| 兼容 | 第一期 macOS；Windows 二期；Linux 后续正式支持 |
+| 部署 | Self-Host；Server 用 **Java 命令**启动；**第一期不做 Docker Compose** |
 
 ---
 
@@ -379,55 +411,70 @@ AgentBoard
 
 **Must**
 
-- Workspace + 登录  
-- Issue：创建、指派 Agent、评论 `@Agent`  
-- Chat：选 Agent 发消息触发  
-- Agent：创建、绑定 1～2 个 Provider + Runtime  
-- Daemon：安装、探测、心跳、领任务、执行、回贴  
-- Task 状态机 + 基础实时刷新  
+- 邮箱注册登录 + 默认单工作区（表结构预留多人多工作区）  
+- Project：可配本机路径；工作目录优先级（项目 > 沙箱）  
+- Issue：创建、列表+简单看板、指派 Agent、评论 `@Agent`  
+- Chat：须先有 Agent；新建下拉选 Agent；发消息触发；默认首页  
+- Agent：创建时选 Provider（Cursor/Claude Code/Codex）+ Instructions；绑定 Runtime/Skills  
+- Daemon：安装、探测、心跳、领任务、执行、回贴（轮询领任务）  
+- Task 状态机 + WebSocket 实时推送（Netty 4.x）  
 - Skill：创建 + 挂载 + 注入  
-- Web 控制台 + CLI  
+- Desktop（Electron）+ Go CLI；Server 地址可配  
 
-**Out of scope（MVP 不做）**
+### 9.1.1 Out of Scope 清单（第一期不做，必须文档化以免二期遗漏）
 
-- 完整 IDE / 内嵌终端编辑器浏览器（Orca 能力）  
-- Autopilot、Squad 多 Agent 编排  
-- 云端 Runtime  
-- 复杂权限与 SSO  
-- 移动端  
+| 能力 | 建议分期 | 备注 |
+|---|---|---|
+| 独立浏览器 Web 部署 | P1 | 仓内 `web/` 二期托管 |
+| Docker Compose / 容器化 Server | P1 | 现用 Java 命令 |
+| 多人协作 UI、邀请成员、角色精细化 | P1 | 表结构已预留 |
+| 多工作区切换（产品侧） | P1 | 同上 |
+| Windows 客户端 | P2 | 第一期仅 macOS |
+| Linux Daemon/CLI 正式支持 | P1 | |
+| OAuth / SSO / 复杂权限 | P1–P2 | |
+| Session 恢复 | P1 | |
+| 任务自动重试、Token/用量 | P1 | |
+| Autopilot | P1 | |
+| Desktop 系统通知 | P1 | |
+| Inbox 邮件/IM | P2 | 站内 Inbox MVP 基础做 |
+| Daemon Wakeup（相对轮询） | P1 | UI 侧已有 WS |
+| 仓库白名单 / Workspace Context | P1 | |
+| Skill URL 导入、检索路由 | P1 / P2 | |
+| 从 Chat 一键生成 Issue | P1 | |
+| 云端 Runtime | P2–P3 | |
+| 完整 IDE / ADE | 明确不做或独立产品 | |
+| 与 Soul IM 整合 | 不纳入 | |
+| 移动端 | 近几期不做 | |
 
 ### 9.2 第 2 期——「像团队一样用」
 
-- Desktop 薄壳、系统通知  
-- Session 恢复、自动重试、用量  
-- Autopilot、Project、标签/子任务  
-- Wakeup 通道、更多 Provider  
-- Inbox 完善、从 Chat 转 Issue  
+从 §9.1.1 的 P1 项中选取：独立 Web、邀请成员、Session 恢复、Autopilot、系统通知、Chat 转 Issue、Wakeup、OAuth 等。
 
 ### 9.3 第 3 期——「规模化」
 
-- 多节点 Server + Redis  
-- Skill 检索路由（大量 Skill）  
-- 云 Runtime / 远程机器  
-- 开放 API 与 Webhook 生态  
+- 多节点 Server + Redis fanout  
+- Skill 检索路由  
+- 云 Runtime  
+- 开放 API 与 Webhook  
 - 审计合规增强  
 
 ---
 
-## 10. 页面与信息架构（MVP）
+## 10. 页面与信息架构（MVP · Desktop）
 
 ```text
 /login
 /{workspace}
-  /issues                 # 列表 + 看板
-  /issues/:id             # 详情、评论、任务运行条
-  /chat                   # 会话列表
-  /chat/:id               # 对话
-  /agents                 # Agent 列表与配置
-  /skills                 # Skill 管理
-  /runtimes               # Runtime / Daemon 状态
-  /inbox                  # 通知
-  /settings               # 工作区、成员、个人 Token
+  /chat                   # 默认首页；左会话列表 + 右对话；新建下拉选 Agent
+  /chat/:id
+  /issues                 # 列表 + 简单看板
+  /issues/:id
+  /agents
+  /skills
+  /runtimes
+  /inbox
+  /settings               # Server 无关项、个人 Token；项目本地路径等
+  /projects               # 项目与本地路径（可并入 Settings，实现时定）
 ```
 
 ---
@@ -436,11 +483,11 @@ AgentBoard
 
 | 风险 | 影响 | 对策 |
 |---|---|---|
-| 各 CLI 协议差异大 | 适配成本高 | MVP 只接 1～2 个；抽象 Backend 接口 |
-| 用户未开 Daemon | 「指派了没反应」 | Onboarding 强引导 + UI 明确 Offline 提示 |
+| 各 CLI 协议差异大 | 适配成本高 | MVP 接 Cursor / Claude Code / Codex；抽象 Provider 接口 |
+| 用户未开 Daemon | 「指派了没反应」 | Onboarding 强引导 + UI 明确 Offline |
 | 日志/评论刷屏 | 体验差 | 摘要回贴 + 详细日志折叠 |
-| 与 Orca 定位混淆 | 范围膨胀 | PRD 明确不做 ADE；IDE 能力不做 MVP |
-| 安全误触（危险命令） | 信任崩盘 | 工作目录隔离、仓库白名单（二期）、取消能力 |
+| 与 Orca 定位混淆 | 范围膨胀 | 明确不做 ADE |
+| 安全误触 | 信任崩盘 | 工作目录隔离、路径校验、取消能力 |
 
 ---
 
@@ -456,24 +503,36 @@ AgentBoard
 
 ## 13. 验收标准（MVP）
 
-1. 本机 `daemon start` 后，Runtime 在 Web 显示在线。  
-2. 新建 Issue 并指派 Agent，无需额外操作即可出现 Task 并进入 running。  
-3. 在 Issue 评论 `@Agent` 一段话，产生新 Task，Agent 回帖可见。  
-4. 在 Chat 发送一条消息，Agent 流式/分段回复可见。  
-5. 关闭 Web/Desktop 后，已 running 的任务仍能完成，再次打开可见结果。  
-6. Agent 挂载 Skill 后，任务工作目录中存在对应 Skill 文件。  
-7. 用户可取消任务；失败任务可一键重跑。  
+1. 本机 `daemon start` 后，Runtime 在 **Desktop** 显示在线。  
+2. 可创建 Agent（指定 Cursor/Claude Code/Codex + Instructions）。  
+3. Chat 新建须下拉选择已有 Agent；会话内展示该 Agent；发消息后 Task 执行且回复经 WS 可见。  
+4. 新建 Issue 并指派 Agent，出现 Task 并进入 running。  
+5. Issue 评论 `@Agent`，产生新 Task，Agent 回帖可见。  
+6. 关闭 Desktop 窗口后，已 running 的任务仍能完成，再次打开可见结果。  
+7. 无项目路径时任务落在 `~/rudder_workspaces/.../workdir/`；有项目本地路径时在该路径执行。  
+8. Agent 挂载 Skill 后，任务工作目录中存在对应 Skill 文件。  
+9. 用户可取消任务；失败任务可一键重跑。  
 
 ---
 
-## 14. 开放问题（需产品确认）
+## 14. 开放问题（已关闭）
 
-1. 产品正式名称与品牌语气？  你帮我起个有寓意的英文名字
-2. Server 首选  Java技术栈，使用jdk21+springboot3+mybatis-plus+mysql+redis(有新增的技术栈再加)
-3. MVP 优先对接哪 1～2 个 Agent CLI？先支持Cursor、claude code、codex三种，可以通过检测扫描本机已安装的，没有则提示安装 
-4. 先做 Cloud 托管，还是 Self-Host 优先？   先选择Self-Host 
-5. Desktop 是否进入 MVP，还是纯 Web + CLI？desktop进入mvp  
-6. 是否需要与现有「Soul」IM 项目整合，还是独立新产品仓库？  独立新产品仓库
+| # | 问题 | 结论 |
+|---|---|---|
+| 1 | 产品名称 | **Rudder** |
+| 2 | Server 技术栈 | JDK21 + Spring Boot 3 + MyBatis-Plus + MySQL + Redis；WS 用 Netty 4.x |
+| 3 | Agent CLI | Cursor、Claude Code、Codex；本机探测，未装提示 |
+| 4 | 部署 | Self-Host；Java 命令跑 Server；不做 Docker Compose（一期） |
+| 5 | 客户端 | Desktop 进 MVP；独立 Web 二期；`web/`+`desktop/` 分目录 |
+| 6 | Soul IM | 独立新产品仓库，不整合 |
+| 7 | Daemon/CLI 语言 | Go |
+| 8 | 前端 | Vue 3 |
+| 9 | 登录 | 邮箱注册+登录 |
+| 10 | 工作区 | 产品单人单工作区；表结构支持多人多工作区 |
+| 11 | 工作目录 | 默认沙箱 + 项目路径（项目优先）；Chat 同规则 |
+| 12 | Server 地址 | Desktop/Daemon 可配任意 Self-Host |
+| 13 | 平台 | 一期 macOS；Windows 二期 |
+| 14 | UI | 左导航；默认 Chat；中文浅色；参考 Multica |
 
 ---
 
@@ -481,19 +540,21 @@ AgentBoard
 
 | 模块 | P0 MVP | P1 | P2 |
 |---|---|---|---|
-| 工作区/成员 | ✅ | 精细权限 | SSO |
+| 工作区/成员 | ✅ 单人默认区 + 表预留 | 邀请/切换/精细权限 | SSO |
 | Issue + 指派触发 | ✅ | 看板增强 | 依赖/子任务 |
 | 评论 @ 触发 | ✅ | 富文本/附件 | 反应 |
-| Chat 触发 | ✅ | 转 Issue | 多模态 |
-| Agent 配置 | ✅ | MCP/Env | 私有可见性 |
-| Daemon/Runtime | ✅ | Wakeup | 云 Runtime |
-| Task 引擎 | ✅ | Session 恢复 | 智能重试 |
+| Chat 触发 | ✅ 须先选 Agent | 转 Issue | 多模态 |
+| Agent 配置 | ✅ Provider+Instructions | MCP/Env | 私有可见性 |
+| Project + 工作目录 | ✅ 双模式 | 多资源类型 | |
+| Daemon/Runtime | ✅ 轮询 | Wakeup | 云 Runtime |
+| Task 引擎 | ✅ + Netty WS | Session 恢复 | 智能重试 |
 | Skill | ✅ | 导入 | 检索路由 |
-| Inbox | ✅ 基础 | 桌面通知 | 外部 IM |
+| Inbox | ✅ 基础站内 | 桌面通知 | 外部 IM |
 | Autopilot | | ✅ | 模板市场 |
-| Desktop | | ✅ | 深度系统集成 |
-| ADE 能力（编辑器/内嵌浏览器） | | | 明确不做或独立产品 |
+| Desktop | ✅ | 系统通知/深度集成 | |
+| 独立 Web | | ✅ 复用 web/ | |
+| ADE | | | 明确不做或独立产品 |
 
 ---
 
-**文档结束。** 确认第 14 节开放问题后，可进入技术设计（TDD/架构详设）与 Sprint 拆分。
+**文档结束。** 可执行规格见 `openspec/`；二期从 §9.1.1 Out of Scope 清单勾选立项。
