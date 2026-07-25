@@ -7,6 +7,7 @@ import {
   loadRememberedAuth,
   saveRememberedAuth,
 } from '@/lib/rememberAuth'
+import { syncDaemonWithDesktopLogin } from '@/lib/syncDaemonLogin'
 
 /** 登录 / 注册页：对接 /api/auth/login 与 /api/auth/register。 */
 
@@ -71,6 +72,12 @@ async function onSubmit() {
     sessionStorage.setItem('rudder_session_token', data.sessionToken)
     sessionStorage.setItem('rudder_user_email', data.user.email)
     sessionStorage.setItem('rudder_workspace_id', data.workspace.id)
+    // Desktop：本机只跑一个 Daemon，登录时自动绑定同一账号并重启（失败不阻断进入）
+    try {
+      await syncDaemonWithDesktopLogin(email.value.trim(), password.value)
+    } catch (e) {
+      console.warn('Daemon 同步失败', e)
+    }
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/chat'
     await router.replace(redirect)
   } catch (e) {

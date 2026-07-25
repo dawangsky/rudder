@@ -1,6 +1,6 @@
 ## Context
 
-Rudder 从零开始建设。对标 Multica：Server 只做协调与状态，Daemon 在用户本机执行 Agent CLI。产品需求见 `docs/PRD-agent-orchestration-platform.md` v0.2 与本 change proposal。
+Rudder 从零开始建设。对标 Multica：Server 只做协调与状态，Daemon 在用户本机执行 Agent CLI。产品需求见 `docs/PRD-agent-orchestration-platform.md` v0.3.1 与本 change proposal。
 
 ## Goals / Non-Goals
 
@@ -11,10 +11,13 @@ Rudder 从零开始建设。对标 Multica：Server 只做协调与状态，Daem
 - 表结构支持未来多人多工作区
 - 工作目录：沙箱默认 + 项目路径优先
 - UI：Desktop 中文浅色，左导航，默认 Chat，气质参考 Multica
+- **Desktop↔Daemon 对齐 Multica**：内嵌 CLI、登录联动、启动自动拉起、profile 隔离、同机可多 Daemon；Runtime **手动添加**（相对 Multica 的刻意差异）
+- 侧栏/设置按 Multica IA **预留置灰入口**，避免二期改导航；业务在 P1 接通
 
-**Non-Goals:**（详见 PRD §9.1.1，须保留在文档中）
+**Non-Goals:**（详见 PRD §9.1.1 / §9.2，须保留在文档中）
 
 - 独立浏览器 Web 产品、Docker Compose、多人邀请 UI、Windows、OAuth/SSO、Session 恢复、Autopilot、云 Runtime、ADE、Soul IM 整合等
+- **MVP 置灰不实现**：侧栏自动化 / 小队 / 用量；设置个人资料·偏好·通知；工作区通用·成员；⌘K 真实搜索（二期从 PRD §9.2 立项）
 
 ## Decisions
 
@@ -38,12 +41,16 @@ Desktop 通过窄接口 `HostBridge` 启停/监控本机 Daemon；业务页面�
 - 启动方式：`mvn spring-boot:run` 或 `java -jar`；**不做 Docker Compose**
 - MySQL/Redis：仅通过本地配置/环境变量引用用户提供的连接信息，**不入库真实密码**
 
-### 3. Daemon
+### 3. Daemon 与 Profile（对齐 Multica）
 
-- Go CLI：`login`、`daemon start|stop|status`、可配 `server_base_url`
-- 启动时探测 PATH 上 Cursor / Claude Code / Codex；缺失则提示
-- 按 workspace × provider 注册 Runtime；心跳（如 15s）；**轮询领任务**（Wakeup 二期）
-- Provider 适配器接口统一 spawn / stream / cancel
+- Go CLI：`login`、`daemon start|stop|status`、`runtime add|remove|detect|enable|list`；可配 `server_base_url` 与 `--profile`
+- **默认 profile（CLI）**：数据目录 `~/.rudder/`
+- **Desktop profile**：`~/.rudder/profiles/desktop/`；Electron 始终带 `--profile desktop`（或等价 `RUDDER_PROFILE`）
+- 每 profile 独立：`credentials.json`、`daemon.pid`、`enabled_providers.json`、`instance.json`（稳定 daemonId）
+- Desktop 登录成功 → `/api/auth/daemon-login` → 写入 Desktop profile 凭证 → restart Desktop Daemon
+- Desktop 启动时若有凭证则自动 `daemon start`；**不接管**终端 CLI Daemon
+- 同机可同时运行多个 profile 的 Daemon；Server 上 Runtime 键为 `workspace + provider + daemonId`
+- **手动添加模型**：不自动全量注册 PATH 上 CLI；用户添加后才进入启用列表并由 Daemon 心跳
 
 ### 4. 工作目录解析
 
@@ -59,7 +66,7 @@ Chat 与 Issue 共用该优先级。永不删除用户项目目录。
 
 ### 5. Agent 与 Chat
 
-- 创建 Agent：必选 provider + 可选 instructions（领域限定）
+- 创建 Agent：必选 provider + 可选 instructions（领域限定）；要求该 provider 至少有一条 online Runtime
 - 新建 Chat：下拉已有 Agent；会话 UI 展示当前 Agent
 - 每条用户消息 → Task(trigger=chat)
 
@@ -67,11 +74,13 @@ Chat 与 Issue 共用该优先级。永不删除用户项目目录。
 
 - 邮箱注册 + 登录（密码哈希）
 - 用户会话 Token（Desktop/API）与 Daemon Token 分离
+- Desktop 登录同时完成会话 Token（渲染进程）与 Daemon Token（Desktop profile 落盘）
 
 ### 7. UI
 
 - 左导航：Chat / Issues / Agents / Skills / Runtimes / Inbox / Settings
 - 默认路由 Chat；Issue 列表+简单看板；中文；浅色；参考 Multica 密度与结构
+- Runtimes：手动添加/移除；展示在线状态与所属 daemon/profile 信息
 
 ## Risks / Trade-offs
 
@@ -81,11 +90,12 @@ Chat 与 Issue 共用该优先级。永不删除用户项目目录。
 | Netty WS 与 Spring 集成复杂度 | 明确端口/路径约定；单机 MVP 可同进程 |
 | 项目路径并发写坏仓库 | 同路径串行锁 + waiting 状态 |
 | 无 Docker 导致环境不一致 | 文档化 JDK/MySQL/Redis 版本；凭据由用户提供 |
+| 双 Daemon 抢同一 Runtime 行 | 注册键含 daemonId；删除按 daemonId+provider |
 
 ## Migration Plan
 
 - 全新库：Flyway/Liquibase 或 SQL 迁移脚本从空库初始化（实现时定）
-- 无存量数据迁移
+- 无存量数据迁移；本机旧 `~/.rudder/credentials.json` 仍作默认 CLI profile
 
 ## Open Questions
 

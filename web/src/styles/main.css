@@ -8,7 +8,7 @@
   --accent: #0f6e56;
   --accent-soft: #e7f5f0;
   --danger: #b42318;
-  --sidebar-w: 220px;
+  --sidebar-w: 240px;
   --font: "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", "Segoe UI", sans-serif;
 }
 
@@ -37,13 +37,8 @@ input {
 }
 
 .sidebar {
-  width: var(--sidebar-w);
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-  padding: 20px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  /* 具体样式由 ShellLayout 对齐 Multica */
+  flex-shrink: 0;
 }
 
 .brand {
@@ -53,32 +48,22 @@ input {
   padding: 0 10px;
 }
 
-.nav-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.nav-item:hover {
-  background: var(--bg);
-}
-
-.nav-item.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
+/* 旧扁平导航样式保留给非壳内场景；主壳用 ShellLayout scoped */
 
 .content {
   flex: 1;
   overflow: auto;
   padding: 24px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content > .page,
+.content > .inbox-shell,
+.content > .settings-shell {
+  flex: 1;
+  min-height: 0;
 }
 
 .page-header {

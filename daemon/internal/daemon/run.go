@@ -11,7 +11,6 @@ import (
 	"github.com/dawangsky/rudder/daemon/internal/detect"
 	"github.com/dawangsky/rudder/daemon/internal/execenv"
 	"github.com/dawangsky/rudder/daemon/internal/provider"
-	"github.com/google/uuid"
 )
 
 // Run 常驻循环：仅为「已手动添加」的 Provider 注册 Runtime、心跳、领任务。
@@ -26,8 +25,12 @@ func Run(serverOverride string) error {
 		base = serverOverride
 	}
 	api := client.New(base, creds.DaemonToken)
-	daemonID := uuid.NewString()
+	daemonID, err := config.LoadOrCreateInstanceID()
+	if err != nil {
+		return err
+	}
 	host, _ := os.Hostname()
+	meta := fmt.Sprintf(`{"profile":%q,"email":%q}`, config.ProfileName(), creds.Email)
 
 	enabled, err := config.LoadEnabledProviders()
 	if err != nil {
@@ -37,13 +40,15 @@ func Run(serverOverride string) error {
 		fmt.Println("尚未添加任何运行时。请在 Desktop「运行时」页添加，或执行: rudder runtime add --provider cursor")
 	}
 
+	fmt.Printf("daemon profile=%s instance=%s email=%s\n", config.ProfileName(), daemonID, creds.Email)
+
 	runtimeIDs := map[string]string{}
 	for _, p := range enabled {
 		if err := detect.RequireInstalled(p); err != nil {
 			fmt.Printf("skip provider=%s: %v\n", p, err)
 			continue
 		}
-		rt, err := api.RegisterRuntime(daemonID, p, host)
+		rt, err := api.RegisterRuntime(daemonID, p, host, meta)
 		if err != nil {
 			return fmt.Errorf("register runtime %s: %w", p, err)
 		}
@@ -71,7 +76,7 @@ func Run(serverOverride string) error {
 			}
 		case <-tickSync.C:
 			// 热加载本机已添加列表（UI/CLI 新增后无需重启 Daemon）
-			syncEnabled(api, daemonID, host, runtimeIDs)
+			syncEnabled(api, daemonID, host, meta, runtimeIDs)
 		case <-tickPoll.C:
 			for prov, id := range runtimeIDs {
 				claim, err := api.Claim(id)
@@ -84,7 +89,7 @@ func Run(serverOverride string) error {
 	}
 }
 
-func syncEnabled(api *client.API, daemonID, host string, runtimeIDs map[string]string) {
+func syncEnabled(api *client.API, daemonID, host, meta string, runtimeIDs map[string]string) {
 	enabled, err := config.LoadEnabledProviders()
 	if err != nil {
 		return
@@ -99,7 +104,7 @@ func syncEnabled(api *client.API, daemonID, host string, runtimeIDs map[string]s
 			fmt.Printf("skip provider=%s: %v\n", p, err)
 			continue
 		}
-		rt, err := api.RegisterRuntime(daemonID, p, host)
+		rt, err := api.RegisterRuntime(daemonID, p, host, meta)
 		if err != nil {
 			fmt.Printf("register runtime %s failed: %v\n", p, err)
 			continue
@@ -109,7 +114,7 @@ func syncEnabled(api *client.API, daemonID, host string, runtimeIDs map[string]s
 	}
 	for p := range runtimeIDs {
 		if !want[p] {
-			_ = api.DeleteRuntimeByProvider(p)
+			_ = api.DeleteRuntimeByProvider(daemonID, p)
 			delete(runtimeIDs, p)
 			fmt.Printf("unregistered runtime provider=%s\n", p)
 		}

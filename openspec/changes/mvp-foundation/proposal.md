@@ -11,6 +11,7 @@
 - Chat / Issue 三条派活路径 + Task 状态机 + Netty WebSocket 实时
 - 工作目录双模式：默认沙箱 + 项目本地路径（项目优先）
 - Skill 挂载与注入；基础 Inbox
+- Desktop 侧栏/设置对齐 Multica IA；置灰入口文档化进二期（PRD §9.2）
 - 文档化第一期 Out of Scope，避免二期遗漏
 
 ## Capabilities
@@ -23,9 +24,9 @@
 - `issue`：Issue 列表/看板、指派触发、评论 @ 触发、活动流
 - `chat`：须选 Agent 的会话、新建下拉、消息触发 Task、WS 展示
 - `task-engine`：Task 状态机、取消/重跑、触发源、结果回贴
-- `daemon-runtime`：探测 CLI、注册 Runtime、心跳、轮询领任务、执行回流
+- `daemon-runtime`：profile 隔离、手动添加 Runtime、按 daemon 实例注册、心跳、轮询领任务、执行回流
 - `skill`：Skill CRUD、挂载、任务前注入
-- `desktop-ui`：左导航壳、默认 Chat、中文浅色、参考 Multica
+- `desktop-ui`：左导航壳、默认 Chat、中文浅色、参考 Multica；内嵌 CLI、登录联动、自动拉起 Desktop Daemon
 - `inbox`：站内基础通知与未读
 
 ### Modified Capabilities

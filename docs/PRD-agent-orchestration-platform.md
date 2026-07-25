@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.2 |
-| 状态 | 需求已锁定（开放问题已关闭） |
+| 文档版本 | v0.3.1 |
+| 状态 | 需求已锁定（开放问题已关闭）；v0.3 Desktop/Daemon；v0.3.1 侧栏置灰项入二期 |
 | 创建日期 | 2026-07-25 |
-| 更新日期 | 2026-07-25 |
+| 更新日期 | 2026-07-26 |
 | 产品正式名 | **Rudder** |
 | 对标产品 | Multica |
 | 文档目标 | 明确架构组成、功能模块、MVP 范围与分期；可执行需求以 OpenSpec 为准 |
@@ -111,10 +111,41 @@ AI Coding Agent（Claude Code、Codex、Cursor Agent 等）能力快速提升，
 | 实时 | WebSocket（**Netty 4.x**） | 评论流、任务进度、Inbox；Redis 可用于后续多节点 |
 | Daemon / CLI | Go | 单二进制；login / daemon / 基础操作 |
 | 前端本体 | Vue 3（目录 `web/`） | 业务 UI；可被 Electron 加载，便于二期独立 Web |
-| Desktop | Electron 薄壳（目录 `desktop/`） | **第一期主客户端**；窗口 + 拉起/监控 daemon，不承载执行 |
+| Desktop | Electron 薄壳（目录 `desktop/`） | **第一期主客户端**；内嵌同一套 CLI，托管 **独立 profile 的 Daemon**，不承载 Agent 执行 |
 | 平台 | 第一期 **macOS** | Windows 二期；Linux 正式支持列入后续 |
 
-> 关键点：**Daemon 独立于窗口**；独立浏览器 Web **不做第一期产品形态**（代码仍放 `web/`）。
+> 关键点：**Daemon 独立于窗口**（关窗不停工）；独立浏览器 Web **不做第一期产品形态**（代码仍放 `web/`）。
+
+### 3.3.1 Desktop 与 Daemon（对齐 Multica）
+
+控制面与执行面分离不变；客户端侧采用与 Multica 相同的「壳 + 本机执行器」关系：
+
+| 原则 | 说明 |
+|---|---|
+| Desktop 内嵌 CLI | `desktop/` 通过 HostBridge 调用同仓 Go 二进制 `rudder`，不另实现执行逻辑 |
+| 登录即联动 | Desktop 会话登录成功后，自动换取 Daemon Token 并写入 **Desktop profile** 凭证；用户无需再手敲 `rudder login` |
+| 启动即拉起 Daemon | Desktop 启动（或登录成功）后自动 `daemon start`（Desktop profile）；侧栏仍可手动启停 |
+| Profile 隔离 | **Desktop Daemon** 与 **终端 CLI Daemon** 使用不同本机目录（凭证 / pid / 已添加 Provider 列表分离），互不覆盖 |
+| 同机可多 Daemon | 允许 Desktop 与 CLI 各跑一个（甚至更多 profile）；各自向 Server 注册 **不同 Runtime 行** |
+| Runtime 语义 | `Runtime = 某个 Daemon 实例 × 某一 Provider`；同一「实例 + 工作区 + Provider」唯一，重启不重复造行 |
+| 手动添加（Rudder 差异） | 本机已安装 CLI **不会自动出现在列表**；须在「运行时」页手动添加（探测失败则注册失败）；轮询只刷新已添加项在线状态 |
+
+本机目录约定（实现真相源见 OpenSpec）：
+
+```text
+~/.rudder/                      # 默认 CLI profile（终端 rudder login / daemon）
+  credentials.json
+  daemon.pid
+  enabled_providers.json
+  instance.json                 # 稳定 daemon 实例 ID
+~/.rudder/profiles/desktop/     # Desktop 专用 profile（Electron 始终 --profile desktop）
+  credentials.json
+  daemon.pid
+  enabled_providers.json
+  instance.json
+```
+
+Token：用户会话 Token（Desktop UI）与 Daemon Token 分离；Desktop 登录时同时完成两者落盘（会话在渲染进程，Daemon Token 在对应 profile）。
 
 ### 3.4 核心对象模型
 
@@ -124,7 +155,7 @@ AI Coding Agent（Claude Code、Codex、Cursor Agent 等）能力快速提升，
 | Member | 人类成员（角色：owner/admin/member；MVP 简化） |
 | Project | 可选业务容器；可配置本机绝对路径作为 Agent 工作目录（**项目路径优先于默认沙箱**） |
 | Agent | 带身份的 AI 工作者（Instructions、Provider、Runtime、Skills）；**开 Chat 前必须先创建** |
-| Runtime | `Daemon × 某款 Agent CLI`（一台机器可注册多个） |
+| Runtime | `Daemon 实例 × 某款 Agent CLI（Provider）`；同机 Desktop/CLI 各注册各的，互不合并 |
 | Issue | 工作单元；可指派给人/Agent；可归属 Project |
 | Comment | Issue 下讨论；`@Agent` 触发任务 |
 | Chat Session | 选择已有 Agent 后创建；可归属 Project；每条用户消息可触发任务 |
@@ -235,23 +266,32 @@ Rudder
 
 ### 5.4 Runtime / Daemon
 
-**目标**：本机常驻执行器，关 UI 不停工。
+**目标**：本机常驻执行器，关 UI 不停工；Desktop/CLI 双通路对齐 Multica。
 
 | 功能 | 说明 | MVP |
 |---|---|---|
-| Daemon 安装与登录 | CLI：`login` / `daemon start|stop|status` | ✅ |
-| CLI 自动探测 | PATH 上发现已安装 Agent | ✅ |
-| Runtime 注册 | 按 workspace × provider 注册 | ✅ |
-| 心跳与在线状态 | 心跳周期可配（如 15s） | ✅ |
+| Daemon 安装与登录 | CLI：`login` / `daemon start|stop|status`；支持 `--profile` | ✅ |
+| Desktop 登录联动 | Desktop 登录自动写入 Desktop profile 的 Daemon Token 并重启该 Daemon | ✅ |
+| Desktop 自动拉起 | 应用启动后自动 start Desktop profile Daemon（无凭证则登录后再起） | ✅ |
+| Profile 隔离 | Desktop 与 CLI 凭证/pid/启用列表分离；同机可并存 | ✅ |
+| 手动添加 Runtime | 探测本机是否安装 → 写入启用列表 → 注册；未安装则失败 | ✅ |
+| Runtime 注册键 | `workspace × provider × daemon_instance_id`（双 Daemon 各一行） | ✅ |
+| 心跳与在线状态 | 心跳约 15s；超时约 45s 展示 offline | ✅ |
 | 任务轮询 + Wakeup | 轮询兜底 + WS 唤醒（可先做轮询） | ✅ 轮询；Wakeup 二期 |
-| Runtime 管理页 | 在线/离线、最近心跳、手动诊断 | ✅ |
-| 桌面端托管 Daemon | Electron 可一键启停（可选） | 二期 |
+| Runtime 管理页 | 在线/离线、心跳、主机、实例/profile、添加/移除 | ✅ |
+| 桌面端托管 Daemon | HostBridge 启停/状态；内嵌 CLI | ✅ |
 
 **非功能约束**
 
 - Daemon 崩溃后可重启并回收/重试孤儿任务  
 - 任务工作目录隔离  
 - 禁止子进程覆盖 Daemon 鉴权环境变量  
+- Desktop 关窗不默认杀掉其 Daemon（与 Multica「关 UI 不停工」一致）；退出登录/切换账号可停止 Desktop profile Daemon  
+
+**与 Multica 的差异（刻意保留）**
+
+- Multica：Daemon 启动时自动探测 PATH 全量注册 Runtime  
+- Rudder：须用户手动添加后才注册；避免「装了就出现」造成误用与噪声列表  
 
 ### 5.5 任务执行引擎
 
@@ -442,13 +482,29 @@ Rudder
 | Skill URL 导入、检索路由 | P1 / P2 | |
 | 从 Chat 一键生成 Issue | P1 | |
 | 云端 Runtime | P2–P3 | |
+| **侧栏「自动化」**（Autopilot / 定时·Webhook 编排 UI） | P1 | MVP 侧栏置灰占位，对齐 Multica 信息架构 |
+| **侧栏「小队」**（Team / 协作小队） | P1 | 置灰占位；依赖多人成员与邀请 |
+| **侧栏「用量」**（Usage / Token·任务用量看板） | P1 | 置灰占位；与 Token/用量统计一并做 |
+| **设置 · 个人资料 / 偏好设置 / 通知** | P1 | 设置二级菜单置灰占位；MVP 仅「一般」「Daemon」可用 |
+| **设置 · 工作区通用 / 成员** | P1 | 工作区设置二级菜单置灰；与邀请成员、多工作区一并做 |
+| **全局搜索（⌘K）落地** | P1 | MVP 仅有入口 UI，无跨实体检索 |
 | 完整 IDE / ADE | 明确不做或独立产品 | |
 | 与 Soul IM 整合 | 不纳入 | |
 | 移动端 | 近几期不做 | |
 
 ### 9.2 第 2 期——「像团队一样用」
 
-从 §9.1.1 的 P1 项中选取：独立 Web、邀请成员、Session 恢复、Autopilot、系统通知、Chat 转 Issue、Wakeup、OAuth 等。
+从 §9.1.1 的 P1 项中选取并立项，优先建议：
+
+1. **补齐侧栏置灰能力**：自动化（Autopilot UI）、小队、用量看板  
+2. **设置页完善**：个人资料、偏好、通知；工作区通用与成员管理  
+3. 独立 Web 部署（复用 `web/`）  
+4. 邀请成员 / 多工作区切换 / 角色精细化  
+5. Session 恢复、Daemon Wakeup、桌面系统通知  
+6. Chat 转 Issue、OAuth/SSO（视客户需要）  
+7. 全局搜索（⌘K）真实检索  
+
+> MVP Desktop 已按 Multica 信息架构**展示**上述置灰入口，避免二期改导航结构；实现时去掉 `soon` 并接通路由即可。
 
 ### 9.3 第 3 期——「规模化」
 
@@ -467,14 +523,32 @@ Rudder
 /{workspace}
   /chat                   # 默认首页；左会话列表 + 右对话；新建下拉选 Agent
   /chat/:id
-  /issues                 # 列表 + 简单看板
+  /issues                 # 列表 + 简单看板（侧栏「我的 issue」与「Issues」同入）
   /issues/:id
+  /projects
   /agents
   /skills
   /runtimes
-  /inbox
-  /settings               # Server 无关项、个人 Token；项目本地路径等
-  /projects               # 项目与本地路径（可并入 Settings，实现时定）
+  /inbox                  # 左列表 + 右详情
+  /settings               # → /settings/daemon
+  /settings/general       # Server 地址
+  /settings/daemon        # Daemon 启停偏好 + 诊断
+  # —— 以下侧栏/设置入口 MVP 置灰，二期接通（见 §9.1.1 / §9.2）——
+  # /automation          # 自动化
+  # /team                 # 小队
+  # /usage                # 用量
+  # /settings/profile|preferences|notifications
+  # /settings/workspace-*|members
+```
+
+侧栏结构（对齐 Multica，置灰项不跳转）：
+
+```text
+账号头（切换/退出）
+搜索…（⌘K，MVP 仅入口） / 新建 issue
+收件箱 · 聊天 · 我的 issue
+工作区：Issues · 项目 · 自动化(灰) · 智能体 · 小队(灰) · 用量(灰)
+配置：运行时 · Skills · 设置
 ```
 
 ---
@@ -496,6 +570,8 @@ Rudder
 | 维度 | 策略 |
 |---|---|
 | 核心体验 | **对齐**：Issue/Chat 发言驱动 Agent + 独立 Daemon |
+| Desktop↔Daemon | **对齐**：内嵌 CLI、登录联动凭证、启动自动拉起、profile 隔离、同机 Desktop/CLI Daemon 可并存 |
+| Runtime 出现方式 | **差异**：Multica 启动自动探测全量注册；Rudder **手动添加**后才注册 |
 | 差异化（建议） | 可结合你方场景：中文团队体验、特定行业 Skill 包、与现有 IM/内部系统打通等（后续单独立项） |
 | 不做 | 第一期不追求 Provider 数量与 Autopilot 完整度超过对标 |
 
@@ -503,7 +579,7 @@ Rudder
 
 ## 13. 验收标准（MVP）
 
-1. 本机 `daemon start` 后，Runtime 在 **Desktop** 显示在线。  
+1. Desktop 登录后本机 Desktop profile Daemon 自动在线；手动添加 Runtime 后列表显示 online。CLI 另起 Daemon 时可并存为另一行。  
 2. 可创建 Agent（指定 Cursor/Claude Code/Codex + Instructions）。  
 3. Chat 新建须下拉选择已有 Agent；会话内展示该 Agent；发消息后 Task 执行且回复经 WS 可见。  
 4. 新建 Issue 并指派 Agent，出现 Task 并进入 running。  
@@ -533,6 +609,7 @@ Rudder
 | 12 | Server 地址 | Desktop/Daemon 可配任意 Self-Host |
 | 13 | 平台 | 一期 macOS；Windows 二期 |
 | 14 | UI | 左导航；默认 Chat；中文浅色；参考 Multica |
+| 15 | Desktop↔Daemon | **对齐 Multica**：内嵌 CLI、登录联动、启动自动拉起、profile 隔离、同机可多 Daemon；Runtime 手动添加（Rudder 差异） |
 
 ---
 
@@ -549,9 +626,11 @@ Rudder
 | Daemon/Runtime | ✅ 轮询 | Wakeup | 云 Runtime |
 | Task 引擎 | ✅ + Netty WS | Session 恢复 | 智能重试 |
 | Skill | ✅ | 导入 | 检索路由 |
-| Inbox | ✅ 基础站内 | 桌面通知 | 外部 IM |
-| Autopilot | | ✅ | 模板市场 |
-| Desktop | ✅ | 系统通知/深度集成 | |
+| Inbox | ✅ 基础站内双栏 | 桌面通知；设置·通知 | 外部 IM |
+| Autopilot / 自动化侧栏 | 置灰占位 | ✅ 接通 | 模板市场 |
+| 小队 / 用量侧栏 | 置灰占位 | ✅ 接通 | |
+| 设置二级（资料/偏好/工作区成员） | 置灰 + 一般/Daemon | ✅ 接通 | |
+| Desktop | ✅ Multica 侧栏 IA | 系统通知/深度集成；⌘K 检索 | |
 | 独立 Web | | ✅ 复用 web/ | |
 | ADE | | | 明确不做或独立产品 |
 

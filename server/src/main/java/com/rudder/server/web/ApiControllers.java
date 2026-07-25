@@ -78,6 +78,17 @@ public class ApiControllers {
     @GetMapping("/runtimes")
     public List<Map<String, Object>> runtimes() { return resourceService.listRuntimes(session()); }
 
+    /** 手动添加：须已通过本机探测；写入当前会话工作区（daemonId 建议为 Desktop 实例 ID）。 */
+    @PostMapping("/runtimes")
+    public Map<String, Object> addRuntime(@RequestBody Map<String, Object> body) {
+        return resourceService.addRuntimeForSession(
+                session(),
+                String.valueOf(body.get("provider")),
+                String.valueOf(body.getOrDefault("hostName", "")),
+                String.valueOf(body.getOrDefault("daemonId", ""))
+        );
+    }
+
     @DeleteMapping("/runtimes/{id}")
     public Map<String, Object> deleteRuntime(@PathVariable Long id) {
         resourceService.deleteRuntime(session(), id);
@@ -85,8 +96,10 @@ public class ApiControllers {
     }
 
     @DeleteMapping("/runtimes/provider/{provider}")
-    public Map<String, Object> deleteRuntimeByProvider(@PathVariable String provider) {
-        resourceService.deleteRuntimeByProvider(session(), provider);
+    public Map<String, Object> deleteRuntimeByProvider(
+            @PathVariable String provider,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String daemonId) {
+        resourceService.deleteRuntimeByProvider(session(), provider, daemonId);
         return Map.of("ok", true);
     }
 
@@ -170,8 +183,10 @@ public class ApiControllers {
     }
 
     @DeleteMapping("/daemon/runtimes/provider/{provider}")
-    public Map<String, Object> deleteDaemonRuntime(@PathVariable String provider) {
-        resourceService.deleteRuntimeByProvider(daemon(), provider);
+    public Map<String, Object> deleteDaemonRuntime(
+            @PathVariable String provider,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String daemonId) {
+        resourceService.deleteRuntimeByProvider(daemon(), provider, daemonId);
         return Map.of("ok", true);
     }
 

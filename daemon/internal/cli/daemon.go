@@ -56,16 +56,21 @@ func newDaemonCmd() *cobra.Command {
 		Use:   "status",
 		Short: "查看 Daemon 状态",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			profile := config.ProfileName()
+			email := ""
+			if creds, err := config.LoadCredentials(); err == nil && creds != nil {
+				email = creds.Email
+			}
 			pidPath, err := config.PidPath()
 			if err != nil {
 				return err
 			}
 			raw, err := os.ReadFile(pidPath)
 			if err != nil {
-				fmt.Println("daemon status: not running")
+				fmt.Printf("daemon status: not running profile=%s email=%s\n", profile, email)
 				return nil
 			}
-			fmt.Printf("daemon status: running pid=%s\n", string(raw))
+			fmt.Printf("daemon status: running pid=%s profile=%s email=%s\n", string(raw), profile, email)
 			return nil
 		},
 	})

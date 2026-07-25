@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/dawangsky/rudder/daemon/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +17,7 @@ func newLoginCmd() *cobra.Command {
 	var password string
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "登录 Rudder Server，保存本机 Daemon 凭证",
+		Short: "登录 Rudder Server，保存当前 profile 的 Daemon 凭证",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if email == "" || password == "" {
 				return fmt.Errorf("请提供 --email 与 --password")
@@ -52,38 +51,19 @@ func newLoginCmd() *cobra.Command {
 			if token == "" {
 				return fmt.Errorf("响应中缺少 daemonToken")
 			}
-			path, err := saveDaemonConfig(serverBaseURL, email, token)
+			path, err := config.SaveCredentials(&config.Credentials{
+				Server:      serverBaseURL,
+				Email:       email,
+				DaemonToken: token,
+			})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("登录成功，Daemon Token 已写入 %s\n", path)
+			fmt.Printf("登录成功（profile=%s），Daemon Token 已写入 %s\n", config.ProfileName(), path)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&email, "email", "", "登录邮箱")
 	cmd.Flags().StringVar(&password, "password", "", "登录密码")
 	return cmd
-}
-
-// saveDaemonConfig 将凭证写到 ~/.rudder/credentials.json（不进 Git）。
-func saveDaemonConfig(server, email, daemonToken string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, ".rudder")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "credentials.json")
-	data := map[string]string{
-		"server":      server,
-		"email":       email,
-		"daemonToken": daemonToken,
-	}
-	raw, _ := json.MarshalIndent(data, "", "  ")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		return "", err
-	}
-	return path, nil
 }

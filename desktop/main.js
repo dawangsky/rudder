@@ -1,19 +1,106 @@
 /**
- * Electron 主进程：薄壳窗口，开发模式加载 Vite（web/），生产加载打包产物。
- * 不在此进程执行 Agent；仅窗口 + HostBridge 托管 Daemon。
+ * Electron 主进程：薄壳窗口 + Desktop profile Daemon（对齐 Multica）。
+ *
+ * - 固定 --profile desktop → ~/.rudder/profiles/desktop/
+ * - 与终端默认 CLI Daemon（~/.rudder/）隔离，可同机并存
+ * - 启动时若有凭证且 autoStartOnLaunch 则自动拉起
+ * - 登录后由渲染进程写入凭证并 restart
  */
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const os = require('os')
 const { spawn } = require('child_process')
 
-/** 开发态默认加载 web Vite；可用环境变量覆盖。 */
 const WEB_DEV_URL = process.env.RUDDER_WEB_URL || 'http://127.0.0.1:5173'
-/** 本机 rudder CLI 路径（后续可做成配置）。 */
 const RUDDER_CLI = process.env.RUDDER_CLI || path.join(__dirname, '..', 'daemon', 'rudder')
+const DESKTOP_PROFILE = 'desktop'
 
 let mainWindow = null
-/** 简单记录由壳拉起的 daemon 子进程（骨架）。 */
 let daemonChild = null
+/** 本次进程内记录的启动时间（用于 Uptime 展示） */
+let daemonStartedAt = null
+
+function profileHome() {
+  return path.join(os.homedir(), '.rudder', 'profiles', DESKTOP_PROFILE)
+}
+
+function credentialsPath() {
+  return path.join(profileHome(), 'credentials.json')
+}
+
+function instancePath() {
+  return path.join(profileHome(), 'instance.json')
+}
+
+function prefsPath() {
+  return path.join(profileHome(), 'desktop.json')
+}
+
+function defaultPrefs() {
+  return {
+    autoStartOnLaunch: true,
+    autoStopOnQuit: false,
+  }
+}
+
+function readPrefs() {
+  try {
+    return { ...defaultPrefs(), ...JSON.parse(fs.readFileSync(prefsPath(), 'utf8')) }
+  } catch {
+    return defaultPrefs()
+  }
+}
+
+function writePrefs(partial) {
+  const next = { ...readPrefs(), ...partial }
+  fs.mkdirSync(profileHome(), { recursive: true, mode: 0o700 })
+  fs.writeFileSync(prefsPath(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+  return next
+}
+
+function readCredentials() {
+  try {
+    return JSON.parse(fs.readFileSync(credentialsPath(), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function readPid() {
+  try {
+    const raw = fs.readFileSync(path.join(profileHome(), 'daemon.pid'), 'utf8').trim()
+    const pid = Number(raw)
+    return Number.isFinite(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+function readOrCreateInstanceId() {
+  try {
+    const f = JSON.parse(fs.readFileSync(instancePath(), 'utf8'))
+    if (f && f.id) return String(f.id)
+  } catch {
+    /* create below */
+  }
+  const { randomUUID } = require('crypto')
+  const id = randomUUID()
+  fs.mkdirSync(profileHome(), { recursive: true, mode: 0o700 })
+  fs.writeFileSync(instancePath(), `${JSON.stringify({ id, profile: DESKTOP_PROFILE }, null, 2)}\n`, { mode: 0o600 })
+  return id
+}
+
+function formatUptime(ms) {
+  if (!ms || ms < 0) return '—'
+  const sec = Math.floor(ms / 1000)
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -26,17 +113,12 @@ function createWindow() {
       nodeIntegration: false,
     },
   })
-
-  // MVP 开发：直接打开 Vue 开发服务器
   mainWindow.loadURL(WEB_DEV_URL)
 }
 
-/**
- * 通过 CLI 查询/启停 Daemon（实现细节后续与真实 status 协议对齐）。
- */
 function runCli(args) {
   return new Promise((resolve) => {
-    const child = spawn(RUDDER_CLI, args, { shell: false })
+    const child = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, ...args], { shell: false })
     let out = ''
     let err = ''
     child.stdout.on('data', (d) => { out += d.toString() })
@@ -50,37 +132,124 @@ function runCli(args) {
   })
 }
 
-ipcMain.handle('daemon:status', async () => {
-  const r = await runCli(['daemon', 'status'])
-  const running = /running/i.test(r.out) && !/not running/i.test(r.out)
-  return {
-    running,
-    message: (r.out || r.err || 'ok').trim(),
-  }
-})
-
-ipcMain.handle('daemon:start', async () => {
-  // 骨架：异步拉起；完整守护进程管理后续完善
-  if (!daemonChild) {
-    daemonChild = spawn(RUDDER_CLI, ['daemon', 'start'], {
-      detached: true,
-      stdio: 'ignore',
-    })
-    daemonChild.unref()
-  }
-  return { running: true, message: '已请求 daemon start' }
-})
-
-ipcMain.handle('daemon:stop', async () => {
+async function stopDaemonProcess() {
   const r = await runCli(['daemon', 'stop'])
   daemonChild = null
-  return { running: false, message: (r.out || r.err || 'stopped').trim() }
+  daemonStartedAt = null
+  return r
+}
+
+async function startDaemonProcess() {
+  await stopDaemonProcess()
+  if (!readCredentials()?.daemonToken) {
+    return { running: false, message: 'Desktop Daemon 未启动：请先登录（将自动同步凭证）' }
+  }
+  daemonChild = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, 'daemon', 'start'], {
+    detached: true,
+    stdio: 'ignore',
+  })
+  daemonChild.unref()
+  daemonStartedAt = Date.now()
+  return { running: true, message: `已启动 Desktop Daemon（profile=${DESKTOP_PROFILE}）` }
+}
+
+async function buildStatus() {
+  const r = await runCli(['daemon', 'status'])
+  const running = /running/i.test(r.out) && !/not running/i.test(r.out)
+  const creds = readCredentials()
+  const email = creds?.email || ''
+  const prefs = readPrefs()
+  const pid = readPid()
+  const cliInstalled = fs.existsSync(RUDDER_CLI)
+  return {
+    running,
+    email,
+    profile: DESKTOP_PROFILE,
+    pid: pid || null,
+    daemonId: readOrCreateInstanceId(),
+    server: creds?.server || '',
+    deviceName: os.hostname(),
+    uptime: running && daemonStartedAt ? formatUptime(Date.now() - daemonStartedAt) : (running ? '—' : '—'),
+    cliInstalled,
+    cliPath: RUDDER_CLI,
+    autoStartOnLaunch: !!prefs.autoStartOnLaunch,
+    autoStopOnQuit: !!prefs.autoStopOnQuit,
+    message: email
+      ? (running
+        ? `Daemon 运行中 · desktop · ${email}`
+        : `Daemon 未运行 · desktop · 已绑定 ${email}`)
+      : ((r.out || r.err || 'ok').trim()),
+  }
+}
+
+ipcMain.handle('daemon:status', async () => buildStatus())
+
+ipcMain.handle('daemon:start', async () => {
+  await startDaemonProcess()
+  return buildStatus()
+})
+ipcMain.handle('daemon:stop', async () => {
+  await stopDaemonProcess()
+  return buildStatus()
+})
+ipcMain.handle('daemon:restart', async () => {
+  await startDaemonProcess()
+  return buildStatus()
 })
 
-/** 手动添加运行时：CLI 会探测本机是否安装，未安装则非 0 退出。 */
+ipcMain.handle('daemon:prefs', async (_evt, partial) => {
+  if (partial && typeof partial === 'object') {
+    writePrefs(partial)
+  }
+  return readPrefs()
+})
+
+ipcMain.handle('daemon:apply-credentials', async (_evt, payload) => {
+  const email = String(payload?.email || '').trim()
+  const daemonToken = String(payload?.daemonToken || '').trim()
+  const server = String(payload?.server || 'http://127.0.0.1:8080').trim()
+  if (!email || !daemonToken) {
+    return { ok: false, message: '缺少 email 或 daemonToken' }
+  }
+  try {
+    fs.mkdirSync(profileHome(), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(
+      credentialsPath(),
+      `${JSON.stringify({ server, email, daemonToken }, null, 2)}\n`,
+      { mode: 0o600 },
+    )
+    readOrCreateInstanceId()
+    return { ok: true, message: `已同步 Desktop Daemon 账号 ${email}` }
+  } catch (e) {
+    return { ok: false, message: e.message || '写入凭证失败' }
+  }
+})
+
+ipcMain.handle('daemon:account', async () => {
+  const creds = readCredentials()
+  return {
+    email: creds?.email || '',
+    server: creds?.server || '',
+    profile: DESKTOP_PROFILE,
+    daemonId: readOrCreateInstanceId(),
+  }
+})
+
 ipcMain.handle('runtime:add', async (_evt, provider) => {
   const r = await runCli(['runtime', 'add', '--provider', String(provider || '')])
   const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '注册失败')
+  return { ok: r.code === 0, message }
+})
+
+ipcMain.handle('runtime:detect', async (_evt, provider) => {
+  const r = await runCli(['runtime', 'detect', '--provider', String(provider || '')])
+  const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '未安装')
+  return { ok: r.code === 0, message }
+})
+
+ipcMain.handle('runtime:enable', async (_evt, provider) => {
+  const r = await runCli(['runtime', 'enable', '--provider', String(provider || '')])
+  const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '启用失败')
   return { ok: r.code === 0, message }
 })
 
@@ -90,14 +259,40 @@ ipcMain.handle('runtime:remove', async (_evt, provider) => {
   return { ok: r.code === 0, message }
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow()
+  const prefs = readPrefs()
+  if (prefs.autoStartOnLaunch) {
+    try {
+      await startDaemonProcess()
+    } catch {
+      /* ignore */
+    }
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
-app.on('window-all-closed', () => {
-  // macOS 常见：关窗不退出应用；Daemon 本身也不应随窗退出
+app.on('window-all-closed', async () => {
+  const prefs = readPrefs()
+  if (prefs.autoStopOnQuit) {
+    try {
+      await stopDaemonProcess()
+    } catch {
+      /* ignore */
+    }
+  }
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', async (e) => {
+  const prefs = readPrefs()
+  if (!prefs.autoStopOnQuit) return
+  // 尽量在退出前停 Daemon（不等待过久）
+  try {
+    await stopDaemonProcess()
+  } catch {
+    /* ignore */
+  }
 })

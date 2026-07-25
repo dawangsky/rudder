@@ -48,13 +48,16 @@ func (a *API) do(method, path string, body any, out any) error {
 	return json.Unmarshal(data, out)
 }
 
-func (a *API) RegisterRuntime(daemonID, provider, host string) (map[string]any, error) {
+func (a *API) RegisterRuntime(daemonID, provider, host, metaJSON string) (map[string]any, error) {
+	if metaJSON == "" {
+		metaJSON = "{}"
+	}
 	var out map[string]any
 	err := a.do(http.MethodPost, "/api/daemon/runtimes", map[string]string{
 		"daemonId": daemonID,
 		"provider": provider,
 		"hostName": host,
-		"metaJson": "{}",
+		"metaJson": metaJSON,
 	}, &out)
 	return out, err
 }
@@ -73,7 +76,8 @@ func (a *API) Report(taskID string, body map[string]any) error {
 	return a.do(http.MethodPost, "/api/daemon/tasks/"+taskID+"/report", body, nil)
 }
 
-// DeleteRuntimeByProvider 从控制面删除该 Provider 的运行时记录。
-func (a *API) DeleteRuntimeByProvider(provider string) error {
-	return a.do(http.MethodDelete, "/api/daemon/runtimes/provider/"+provider, nil, nil)
+// DeleteRuntimeByProvider 删除当前 Daemon 实例下该 Provider 的运行时（不误删其它 profile）。
+func (a *API) DeleteRuntimeByProvider(daemonID, provider string) error {
+	path := "/api/daemon/runtimes/provider/" + provider + "?daemonId=" + daemonID
+	return a.do(http.MethodDelete, path, nil, nil)
 }

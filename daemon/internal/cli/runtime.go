@@ -7,7 +7,6 @@ import (
 	"github.com/dawangsky/rudder/daemon/internal/client"
 	"github.com/dawangsky/rudder/daemon/internal/config"
 	"github.com/dawangsky/rudder/daemon/internal/detect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -33,16 +32,20 @@ func newRuntimeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			daemonID := uuid.NewString()
+			daemonID, err := config.LoadOrCreateInstanceID()
+			if err != nil {
+				return err
+			}
 			host, _ := os.Hostname()
-			rt, err := api.RegisterRuntime(daemonID, addProvider, host)
+			meta := fmt.Sprintf(`{"profile":%q}`, config.ProfileName())
+			rt, err := api.RegisterRuntime(daemonID, addProvider, host, meta)
 			if err != nil {
 				return fmt.Errorf("注册失败: %w", err)
 			}
 			if err := config.AddEnabledProvider(addProvider); err != nil {
 				return err
 			}
-			fmt.Printf("已添加运行时 provider=%s id=%s\n", addProvider, rt["id"])
+			fmt.Printf("已添加运行时 provider=%s id=%s profile=%s\n", addProvider, rt["id"], config.ProfileName())
 			fmt.Println("若 Daemon 已在运行，约 10 秒内会自动接管心跳；否则请 rudder daemon start")
 			return nil
 		},
@@ -66,10 +69,14 @@ func newRuntimeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("本机列表已清除，但删除服务端记录失败（请先 login）: %w", err)
 			}
-			if err := api.DeleteRuntimeByProvider(removeProvider); err != nil {
+			daemonID, err := config.LoadOrCreateInstanceID()
+			if err != nil {
+				return fmt.Errorf("本机列表已清除，但读取实例 ID 失败: %w", err)
+			}
+			if err := api.DeleteRuntimeByProvider(daemonID, removeProvider); err != nil {
 				return fmt.Errorf("本机列表已清除，但删除服务端记录失败: %w", err)
 			}
-			fmt.Printf("已移除运行时 provider=%s\n", removeProvider)
+			fmt.Printf("已移除运行时 provider=%s profile=%s\n", removeProvider, config.ProfileName())
 			return nil
 		},
 	}
@@ -99,7 +106,48 @@ func newRuntimeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(add, remove, list)
+	var detectProvider string
+	detectCmd := &cobra.Command{
+		Use:          "detect",
+		Short:        "仅探测本机是否安装 Provider（不注册）",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if detectProvider == "" {
+				return fmt.Errorf("请指定 --provider")
+			}
+			if err := detect.RequireInstalled(detectProvider); err != nil {
+				return err
+			}
+			fmt.Printf("ok provider=%s installed\n", detectProvider)
+			return nil
+		},
+	}
+	detectCmd.Flags().StringVar(&detectProvider, "provider", "", "cursor | claude_code | codex | stub")
+	_ = detectCmd.MarkFlagRequired("provider")
+
+	var enableProvider string
+	enableCmd := &cobra.Command{
+		Use:          "enable",
+		Short:        "写入本机启用列表（供 Daemon 心跳），不访问 Server",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if enableProvider == "" {
+				return fmt.Errorf("请指定 --provider")
+			}
+			if err := detect.RequireInstalled(enableProvider); err != nil {
+				return err
+			}
+			if err := config.AddEnabledProvider(enableProvider); err != nil {
+				return err
+			}
+			fmt.Printf("已启用本机运行时 provider=%s\n", enableProvider)
+			return nil
+		},
+	}
+	enableCmd.Flags().StringVar(&enableProvider, "provider", "", "cursor | claude_code | codex | stub")
+	_ = enableCmd.MarkFlagRequired("provider")
+
+	cmd.AddCommand(add, remove, list, detectCmd, enableCmd)
 	return cmd
 }
 

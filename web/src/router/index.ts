@@ -8,6 +8,7 @@ import SkillsView from '../views/SkillsView.vue'
 import RuntimesView from '../views/RuntimesView.vue'
 import InboxView from '../views/InboxView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import ProjectsView from '../views/ProjectsView.vue'
 
 /**
  * 路由：登录后默认进入 Chat（产品约定）。
@@ -24,11 +25,13 @@ export const router = createRouter({
         { path: '', redirect: '/chat' },
         { path: 'chat', name: 'chat', component: ChatView },
         { path: 'issues', name: 'issues', component: IssuesView },
+        { path: 'projects', name: 'projects', component: ProjectsView },
         { path: 'agents', name: 'agents', component: AgentsView },
         { path: 'skills', name: 'skills', component: SkillsView },
         { path: 'runtimes', name: 'runtimes', component: RuntimesView },
         { path: 'inbox', name: 'inbox', component: InboxView },
-        { path: 'settings', name: 'settings', component: SettingsView },
+        { path: 'settings', redirect: '/settings/daemon' },
+        { path: 'settings/:section', name: 'settings', component: SettingsView },
       ],
     },
   ],

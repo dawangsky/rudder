@@ -59,3 +59,12 @@
 - [x] 9.1 站内通知写入与未读角标
 - [x] 9.2 按 PRD §13 / 本 change specs 做端到端验收清单勾选
 - [x] 9.3 确认 Out of Scope 清单仍在 PRD 与本 change 中可追溯
+
+## 10. Desktop↔Daemon 对齐 Multica（PRD v0.3）
+
+- [x] 10.1 CLI `--profile` / `RUDDER_PROFILE`；Desktop 固定 `desktop` 目录隔离
+- [x] 10.2 稳定 `instance.json` daemonId；Server upsert 键含 daemonId
+- [x] 10.3 Desktop 登录写入 Desktop profile 凭证并 restart；启动自动拉起
+- [x] 10.4 删除 Runtime 按 daemonId+provider，避免双 Daemon 误删
+- [x] 10.5 更新 PRD v0.3 + OpenSpec specs/design；运行时页文案
+- [x] 10.6 PRD v0.3.1 / OpenSpec：侧栏与设置置灰项列入 §9.1.1 Out of Scope 与 §9.2 二期

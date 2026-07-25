@@ -229,7 +229,8 @@ public class ResourceService {
     }
 
     /**
-     * Daemon 注册/刷新 Runtime：同一工作区同一 Provider 只保留一条（手动添加模型）。
+     * Daemon 注册/刷新 Runtime：同一工作区 + Provider + Daemon 实例 只保留一条。
+     * Desktop 与 CLI 使用不同 daemonId，可同机并存。
      */
     @Transactional
     public Map<String, Object> upsertRuntime(Long workspaceId, String daemonId, String provider,
@@ -237,16 +238,21 @@ public class ResourceService {
         if (!WorkdirResolver.isAllowedProvider(provider)) {
             throw new IllegalArgumentException("不支持的 Provider: " + provider);
         }
+        if (!StringUtils.hasText(daemonId)) {
+            throw new IllegalArgumentException("daemonId 不能为空");
+        }
+        String prov = provider.toLowerCase();
         RuntimeEntity existing = runtimeMapper.selectOne(new LambdaQueryWrapper<RuntimeEntity>()
                 .eq(RuntimeEntity::getWorkspaceId, workspaceId)
-                .eq(RuntimeEntity::getProvider, provider)
+                .eq(RuntimeEntity::getProvider, prov)
+                .eq(RuntimeEntity::getDaemonId, daemonId)
                 .last("LIMIT 1"));
         LocalDateTime now = LocalDateTime.now();
         if (existing == null) {
             existing = new RuntimeEntity();
             existing.setWorkspaceId(workspaceId);
             existing.setDaemonId(daemonId);
-            existing.setProvider(provider);
+            existing.setProvider(prov);
             existing.setHostName(hostName);
             existing.setStatus("online");
             existing.setLastHeartbeatAt(now);
@@ -255,7 +261,6 @@ public class ResourceService {
             existing.setUpdatedAt(now);
             runtimeMapper.insert(existing);
         } else {
-            existing.setDaemonId(daemonId);
             existing.setHostName(hostName);
             existing.setStatus("online");
             existing.setLastHeartbeatAt(now);
@@ -277,15 +282,37 @@ public class ResourceService {
         wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(id)));
     }
 
-    /** 按 Provider 删除当前工作区运行时（移除时避免 Daemon 再次注册后列表「删不掉」）。 */
+    /**
+     * 会话侧添加运行时：写入当前登录用户工作区。
+     * daemonId 建议传 Desktop profile 的稳定实例 ID，便于随后由 Desktop Daemon 接管心跳。
+     */
     @Transactional
-    public void deleteRuntimeByProvider(AuthPrincipal p, String provider) {
+    public Map<String, Object> addRuntimeForSession(AuthPrincipal p, String provider, String hostName,
+                                                    String daemonId) {
+        if (!WorkdirResolver.isAllowedProvider(provider)) {
+            throw new IllegalArgumentException("不支持的 Provider: " + provider);
+        }
+        String host = StringUtils.hasText(hostName) ? hostName : "";
+        String id = StringUtils.hasText(daemonId) ? daemonId : "session-add";
+        String meta = "{\"profile\":\"desktop\",\"source\":\"session-add\"}";
+        return upsertRuntime(p.workspaceId(), id, provider.toLowerCase(), host, meta);
+    }
+
+    /**
+     * 按 Provider 删除；若指定 daemonId 则只删该实例，否则删当前工作区该 Provider 全部行。
+     */
+    @Transactional
+    public void deleteRuntimeByProvider(AuthPrincipal p, String provider, String daemonId) {
         if (!StringUtils.hasText(provider)) {
             throw new IllegalArgumentException("provider 不能为空");
         }
-        List<RuntimeEntity> list = runtimeMapper.selectList(new LambdaQueryWrapper<RuntimeEntity>()
+        LambdaQueryWrapper<RuntimeEntity> q = new LambdaQueryWrapper<RuntimeEntity>()
                 .eq(RuntimeEntity::getWorkspaceId, p.workspaceId())
-                .eq(RuntimeEntity::getProvider, provider.toLowerCase()));
+                .eq(RuntimeEntity::getProvider, provider.toLowerCase());
+        if (StringUtils.hasText(daemonId)) {
+            q.eq(RuntimeEntity::getDaemonId, daemonId);
+        }
+        List<RuntimeEntity> list = runtimeMapper.selectList(q);
         for (RuntimeEntity r : list) {
             runtimeMapper.deleteById(r.getId());
             wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(r.getId())));
@@ -314,6 +341,20 @@ public class ResourceService {
         }
         m.put("status", status);
         m.put("lastHeartbeatAt", r.getLastHeartbeatAt() == null ? null : r.getLastHeartbeatAt().toString());
+        // 从 meta 提取 profile，便于 UI 区分 Desktop/CLI
+        String profile = "";
+        if (StringUtils.hasText(r.getMetaJson()) && r.getMetaJson().contains("profile")) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> meta = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(r.getMetaJson(), Map.class);
+                Object pv = meta.get("profile");
+                if (pv != null) profile = String.valueOf(pv);
+            } catch (Exception ignored) {
+                /* ignore */
+            }
+        }
+        m.put("profile", profile);
         return m;
     }
 

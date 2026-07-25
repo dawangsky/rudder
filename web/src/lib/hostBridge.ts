@@ -3,6 +3,29 @@
 export type DaemonStatus = {
   running: boolean
   message: string
+  email?: string
+  profile?: string
+  pid?: number | null
+  daemonId?: string
+  server?: string
+  deviceName?: string
+  uptime?: string
+  cliInstalled?: boolean
+  cliPath?: string
+  autoStartOnLaunch?: boolean
+  autoStopOnQuit?: boolean
+}
+
+export type DaemonPrefs = {
+  autoStartOnLaunch: boolean
+  autoStopOnQuit: boolean
+}
+
+export type DaemonAccount = {
+  email: string
+  server: string
+  profile?: string
+  daemonId?: string
 }
 
 export type RuntimeActionResult = {
@@ -10,11 +33,23 @@ export type RuntimeActionResult = {
   message: string
 }
 
+export type DaemonCredentialsPayload = {
+  email: string
+  daemonToken: string
+  server: string
+}
+
 type HostBridgeApi = {
   getDaemonStatus: () => Promise<DaemonStatus>
   startDaemon: () => Promise<DaemonStatus>
   stopDaemon: () => Promise<DaemonStatus>
-  /** 探测本机 CLI 并注册运行时；未安装则 ok=false */
+  restartDaemon: () => Promise<DaemonStatus>
+  getDaemonPrefs: () => Promise<DaemonPrefs>
+  setDaemonPrefs: (partial: Partial<DaemonPrefs>) => Promise<DaemonPrefs>
+  applyDaemonCredentials: (payload: DaemonCredentialsPayload) => Promise<RuntimeActionResult>
+  getDaemonAccount: () => Promise<DaemonAccount>
+  detectRuntime: (provider: string) => Promise<RuntimeActionResult>
+  enableRuntime: (provider: string) => Promise<RuntimeActionResult>
   addRuntime: (provider: string) => Promise<RuntimeActionResult>
   removeRuntime: (provider: string) => Promise<RuntimeActionResult>
 }
@@ -25,7 +60,17 @@ declare global {
   }
 }
 
-/** 获取宿主桥；纯浏览器预览时返回 stub（需用 CLI 添加运行时）。 */
+export function isDesktopHost(): boolean {
+  return typeof window !== 'undefined' && !!window.rudderHost
+}
+
+function unsupported(action: string, provider?: string): RuntimeActionResult {
+  const tip = provider
+    ? `非 Desktop：请执行 rudder runtime ${action} --provider ${provider}`
+    : `非 Desktop：请使用 CLI（rudder runtime ${action}）`
+  return { ok: false, message: tip }
+}
+
 export function getHostBridge(): HostBridgeApi {
   if (window.rudderHost) return window.rudderHost
   return {
@@ -38,17 +83,32 @@ export function getHostBridge(): HostBridgeApi {
     async stopDaemon() {
       return { running: false, message: '非 Desktop 环境' }
     },
+    async restartDaemon() {
+      return { running: false, message: '非 Desktop 环境' }
+    },
+    async getDaemonPrefs() {
+      return { autoStartOnLaunch: true, autoStopOnQuit: false }
+    },
+    async setDaemonPrefs(partial) {
+      return { autoStartOnLaunch: true, autoStopOnQuit: false, ...partial }
+    },
+    async applyDaemonCredentials() {
+      return { ok: false, message: '非 Desktop 环境：请执行 rudder login' }
+    },
+    async getDaemonAccount() {
+      return { email: '', server: '', profile: '', daemonId: '' }
+    },
+    async detectRuntime(provider: string) {
+      return unsupported('detect', provider)
+    },
+    async enableRuntime(provider: string) {
+      return unsupported('enable', provider)
+    },
     async addRuntime(provider: string) {
-      return {
-        ok: false,
-        message: `非 Desktop 环境：请执行 rudder runtime add --provider ${provider}`,
-      }
+      return unsupported('add', provider)
     },
     async removeRuntime(provider: string) {
-      return {
-        ok: false,
-        message: `非 Desktop 环境：请执行 rudder runtime remove --provider ${provider}`,
-      }
+      return unsupported('remove', provider)
     },
   }
 }

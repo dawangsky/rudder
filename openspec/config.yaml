@@ -10,7 +10,9 @@ context: |
   Providers: Cursor, Claude Code, Codex (detect locally).
   Auth: email register/login. Product: single-user single workspace; schema multi-tenant ready.
   Workdir: project local path > sandbox ~/rudder_workspaces/{ws}/{task}/workdir/.
-  Chat requires Agent first; UI Chinese light theme; Multica-inspired; default route Chat.
+  Chat requires Agent first; UI Chinese light theme; Multica-inspired Desktop↔Daemon
+  (embedded CLI, login sync, auto-start, profile isolation; Runtime manual-add); default route Chat.
+  Sidebar/settings grayed stubs (automation/team/usage/profile/…) documented in PRD §9.1.1 / §9.2 for phase-2.
   Never invent MySQL/Redis credentials — ask the user.
   Process: OpenSpec before code; local git commit per requirement/code change.
   PRD: docs/PRD-agent-orchestration-platform.md (background); openspec/ is source of truth for behavior.
