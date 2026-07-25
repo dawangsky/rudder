@@ -3,14 +3,12 @@ server:
   port: 8080
 
 rudder:
-  # 填写 MySQL/Redis 后改为 true，并去掉启动类上的 DataSource/Redis exclude
   persistence:
     enabled: false
 
 spring:
   application:
     name: rudder-server
-  # 数据源占位：真实值在 application-local.yml 或环境变量中覆盖
   datasource:
     url: jdbc:mysql://${RUDDER_MYSQL_HOST:127.0.0.1}:${RUDDER_MYSQL_PORT:3306}/${RUDDER_MYSQL_DB:rudder}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${RUDDER_MYSQL_USER:rudder}
