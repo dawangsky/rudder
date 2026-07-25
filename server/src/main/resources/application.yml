@@ -7,6 +7,9 @@ rudder:
     enabled: false
   ws:
     port: 8081
+    # 协议层心跳：写空闲发 Ping；读空闲（含未收到 Pong）断连。浏览器会自动回 Pong。
+    writer-idle-seconds: 30
+    reader-idle-seconds: 60
 
 spring:
   application:
