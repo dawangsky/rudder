@@ -1,9 +1,9 @@
 ## 1. 仓与工程脚手架
 
-- [ ] 1.1 创建 monorepo 目录：`server/`、`daemon/`、`web/`、`desktop/`，并补充根 README（含 Self-Host Java 启动说明）
-- [ ] 1.2 初始化 Java Spring Boot 3（JDK 21）工程与基础配置模板（MySQL/Redis 占位，**不写入真实密码**）
-- [ ] 1.3 初始化 Go module（CLI + daemon 命令骨架）
-- [ ] 1.4 初始化 Vue 3 + Vite（`web/`）与 Electron 薄壳（`desktop/`）可加载 web
+- [x] 1.1 创建 monorepo 目录：`server/`、`daemon/`、`web/`、`desktop/`，并补充根 README（含 Self-Host Java 启动说明）
+- [x] 1.2 初始化 Java Spring Boot 3（JDK 21）工程与基础配置模板（MySQL/Redis 占位，**不写入真实密码**）
+- [x] 1.3 初始化 Go module（CLI + daemon 命令骨架）
+- [x] 1.4 初始化 Vue 3 + Vite（`web/`）与 Electron 薄壳（`desktop/`）可加载 web
 - [ ] 1.5 向用户索取并本地配置 MySQL/Redis 连接信息后验证连通
 
 ## 2. 认证与工作区

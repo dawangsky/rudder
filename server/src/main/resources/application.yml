@@ -1,0 +1,39 @@
+# 默认配置：不含真实密码。本地请使用 profile=local + application-local.yml
+server:
+  port: 8080
+
+rudder:
+  # 填写 MySQL/Redis 后改为 true，并去掉启动类上的 DataSource/Redis exclude
+  persistence:
+    enabled: false
+
+spring:
+  application:
+    name: rudder-server
+  # 数据源占位：真实值在 application-local.yml 或环境变量中覆盖
+  datasource:
+    url: jdbc:mysql://${RUDDER_MYSQL_HOST:127.0.0.1}:${RUDDER_MYSQL_PORT:3306}/${RUDDER_MYSQL_DB:rudder}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${RUDDER_MYSQL_USER:rudder}
+    password: ${RUDDER_MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${RUDDER_REDIS_HOST:127.0.0.1}
+      port: ${RUDDER_REDIS_PORT:6379}
+      password: ${RUDDER_REDIS_PASSWORD:}
+      database: ${RUDDER_REDIS_DB:0}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: assign_id
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+logging:
+  level:
+    com.rudder.server: INFO

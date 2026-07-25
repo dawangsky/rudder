@@ -1,2 +1,34 @@
 .DS_Store
 **/.DS_Store
+
+# Java
+server/target/
+server/.mvn/wrapper/*.jar
+server/src/main/resources/application-local.yml
+
+# Go
+daemon/rudder
+daemon/bin/
+daemon/dist/
+
+# Node
+**/node_modules/
+web/dist/
+desktop/dist/
+desktop/out/
+*.log
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+**/*secret*
+**/*.pem
+
+# IDE
+.idea/
+*.iml
+.vscode/
+!.cursor/
+
+*.tsbuildinfo
