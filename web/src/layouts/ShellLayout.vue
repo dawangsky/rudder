@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { onMounted, ref, computed } from 'vue'
+import { getHostBridge } from '@/lib/hostBridge'
 import { useRoute, useRouter } from 'vue-router'
-import { computed } from 'vue'
-
-/** 左侧常驻导航壳：参考 Multica 控制台密度，中文浅色。 */
+import { apiFetch } from '@/lib/api'
 
 const route = useRoute()
 const router = useRouter()
+const daemonMsg = ref('')
+const unread = ref(0)
 
 const navItems = [
   { path: '/chat', label: '对话' },
@@ -18,6 +20,36 @@ const navItems = [
 ]
 
 const activePath = computed(() => route.path)
+
+async function refreshDaemon() {
+  const s = await getHostBridge().getDaemonStatus()
+  daemonMsg.value = s.running ? `Daemon 运行中` : (s.message || 'Daemon 未运行')
+}
+
+async function startDaemon() {
+  daemonMsg.value = (await getHostBridge().startDaemon()).message
+  await refreshDaemon()
+}
+
+async function stopDaemon() {
+  daemonMsg.value = (await getHostBridge().stopDaemon()).message
+  await refreshDaemon()
+}
+
+async function loadUnread() {
+  try {
+    const data = await apiFetch<{ unread: number }>('/api/inbox')
+    unread.value = data.unread || 0
+  } catch {
+    unread.value = 0
+  }
+}
+
+onMounted(() => {
+  refreshDaemon()
+  loadUnread()
+  setInterval(loadUnread, 15000)
+})
 
 function go(path: string) {
   router.push(path)
@@ -38,11 +70,45 @@ function go(path: string) {
           @click="go(item.path)"
         >
           {{ item.label }}
+          <span v-if="item.path === '/inbox' && unread" class="badge">{{ unread }}</span>
         </button>
       </nav>
+      <div class="daemon-box">
+        <div class="muted small">{{ daemonMsg }}</div>
+        <div class="row">
+          <button type="button" class="mini" @click="startDaemon">启动</button>
+          <button type="button" class="mini" @click="stopDaemon">停止</button>
+        </div>
+      </div>
     </aside>
     <main class="content">
       <router-view />
     </main>
   </div>
 </template>
+
+<style scoped>
+.badge {
+  margin-left: 6px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.daemon-box {
+  margin-top: auto;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+.small { font-size: 12px; }
+.row { display: flex; gap: 6px; margin-top: 8px; }
+.mini {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+}
+</style>
