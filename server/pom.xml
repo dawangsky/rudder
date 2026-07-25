@@ -69,6 +69,12 @@
             <version>4.1.115.Final</version>
         </dependency>
 
+        <!-- 仅引入密码哈希，不启用完整 Spring Security 过滤器链 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
         <!-- Lombok：减少样板代码（可选） -->
         <dependency>
             <groupId>org.projectlombok</groupId>
