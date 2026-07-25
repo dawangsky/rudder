@@ -1,13 +1,16 @@
 package com.rudder.server.domain;
 
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-
-import java.time.LocalDateTime;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /** 工作区成员表 rb_workspace_member */
 @TableName("rb_workspace_member")
+@Data
+@NoArgsConstructor
 public class WorkspaceMemberEntity {
 
     /** 成员记录id */
@@ -29,15 +32,4 @@ public class WorkspaceMemberEntity {
     /** 创建时间 */
     @TableField("created_at")
     private LocalDateTime createdAt;
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public Long getWorkspaceId() { return workspaceId; }
-    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
-    public Long getUserId() { return userId; }
-    public void setUserId(Long userId) { this.userId = userId; }
-    public String getRole() { return role; }
-    public void setRole(String role) { this.role = role; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

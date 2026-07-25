@@ -1,14 +1,17 @@
 package com.rudder.server.domain;
 
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-
-import java.time.LocalDateTime;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /** Skill 表 rb_skill */
 @TableName("rb_skill")
+@Data
+@NoArgsConstructor
 public class SkillEntity {
 
     /** Skill id */
@@ -39,19 +42,4 @@ public class SkillEntity {
     @TableLogic
     @TableField("deleted")
     private Integer deleted;
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public Long getWorkspaceId() { return workspaceId; }
-    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    public String getContent() { return content; }
-    public void setContent(String content) { this.content = content; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-    public Integer getDeleted() { return deleted; }
-    public void setDeleted(Integer deleted) { this.deleted = deleted; }
 }

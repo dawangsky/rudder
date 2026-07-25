@@ -1,13 +1,16 @@
 package com.rudder.server.domain;
 
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-
-import java.time.LocalDateTime;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /** Daemon Runtime 表 rb_runtime */
 @TableName("rb_runtime")
+@Data
+@NoArgsConstructor
 public class RuntimeEntity {
 
     /** Runtime id */
@@ -49,25 +52,4 @@ public class RuntimeEntity {
     /** 更新时间 */
     @TableField("updated_at")
     private LocalDateTime updatedAt;
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public Long getWorkspaceId() { return workspaceId; }
-    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
-    public String getDaemonId() { return daemonId; }
-    public void setDaemonId(String daemonId) { this.daemonId = daemonId; }
-    public String getProvider() { return provider; }
-    public void setProvider(String provider) { this.provider = provider; }
-    public String getHostName() { return hostName; }
-    public void setHostName(String hostName) { this.hostName = hostName; }
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-    public LocalDateTime getLastHeartbeatAt() { return lastHeartbeatAt; }
-    public void setLastHeartbeatAt(LocalDateTime lastHeartbeatAt) { this.lastHeartbeatAt = lastHeartbeatAt; }
-    public String getMetaJson() { return metaJson; }
-    public void setMetaJson(String metaJson) { this.metaJson = metaJson; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

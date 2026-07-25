@@ -1,14 +1,17 @@
 package com.rudder.server.domain;
 
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-
-import java.time.LocalDateTime;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 /** Agent 表 rb_agent */
 @TableName("rb_agent")
+@Data
+@NoArgsConstructor
 public class AgentEntity {
 
     /** Agent id */
@@ -63,31 +66,4 @@ public class AgentEntity {
     @TableLogic
     @TableField("deleted")
     private Integer deleted;
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public Long getWorkspaceId() { return workspaceId; }
-    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    public String getAvatar() { return avatar; }
-    public void setAvatar(String avatar) { this.avatar = avatar; }
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
-    public String getInstructions() { return instructions; }
-    public void setInstructions(String instructions) { this.instructions = instructions; }
-    public String getProvider() { return provider; }
-    public void setProvider(String provider) { this.provider = provider; }
-    public Long getRuntimeId() { return runtimeId; }
-    public void setRuntimeId(Long runtimeId) { this.runtimeId = runtimeId; }
-    public Integer getMaxConcurrency() { return maxConcurrency; }
-    public void setMaxConcurrency(Integer maxConcurrency) { this.maxConcurrency = maxConcurrency; }
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-    public Integer getDeleted() { return deleted; }
-    public void setDeleted(Integer deleted) { this.deleted = deleted; }
 }
