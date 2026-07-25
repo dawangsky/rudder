@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { apiFetch } from '@/lib/api'
+import {
+  clearRememberedAuth,
+  loadRememberedAuth,
+  saveRememberedAuth,
+} from '@/lib/rememberAuth'
 
 /** 登录 / 注册页：对接 /api/auth/login 与 /api/auth/register。 */
 
@@ -17,8 +22,19 @@ const mode = ref<'login' | 'register'>('login')
 const email = ref('')
 const password = ref('')
 const displayName = ref('')
+/** 记住账号密码（写入 localStorage） */
+const remember = ref(false)
 const error = ref('')
 const loading = ref(false)
+
+onMounted(() => {
+  const saved = loadRememberedAuth()
+  if (saved) {
+    email.value = saved.email
+    password.value = saved.password
+    remember.value = true
+  }
+})
 
 async function onSubmit() {
   error.value = ''
@@ -40,6 +56,11 @@ async function onSubmit() {
       method: 'POST',
       body: JSON.stringify(body),
     })
+    if (remember.value) {
+      saveRememberedAuth(email.value.trim(), password.value)
+    } else {
+      clearRememberedAuth()
+    }
     sessionStorage.setItem('rudder_session_token', data.sessionToken)
     sessionStorage.setItem('rudder_user_email', data.user.email)
     sessionStorage.setItem('rudder_workspace_id', data.workspace.id)
@@ -70,6 +91,10 @@ async function onSubmit() {
         显示名（可选）
         <input v-model="displayName" type="text" autocomplete="nickname" />
       </label>
+      <label class="remember">
+        <input v-model="remember" type="checkbox" />
+        记住账号密码
+      </label>
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" class="primary" :disabled="loading">
         {{ loading ? '请稍候…' : mode === 'login' ? '登录' : '注册' }}
@@ -89,5 +114,17 @@ async function onSubmit() {
   cursor: pointer;
   padding: 4px 0;
   text-align: left;
+}
+.remember {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted, #666);
+}
+.remember input {
+  width: auto;
+  margin: 0;
 }
 </style>
