@@ -1,4 +1,5 @@
-# 与 application-local.yml 一致的本机开发模板（127.0.0.1）
+# 本机开发配置（允许入库：仅 127.0.0.1 开发库）
+# MySQL: root / root123456；Redis: 无密码
 
 rudder:
   persistence:
@@ -13,6 +14,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6379
+      # Redis 无密码
       password:
       database: 0
 

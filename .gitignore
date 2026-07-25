@@ -4,7 +4,6 @@
 # Java
 server/target/
 server/.mvn/wrapper/*.jar
-server/src/main/resources/application-local.yml
 
 # Go
 daemon/rudder
