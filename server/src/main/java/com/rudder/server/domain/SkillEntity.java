@@ -7,21 +7,25 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/** 工作区表 rb_workspace */
-@TableName("rb_workspace")
-public class WorkspaceEntity {
+/** Skill 表 rb_skill */
+@TableName("rb_skill")
+public class SkillEntity {
 
-    /** 工作区id */
+    /** Skill id */
     @TableId("id")
     private Long id;
 
-    /** 工作区名称 */
+    /** 工作区id */
+    @TableField("workspace_id")
+    private Long workspaceId;
+
+    /** Skill 名称 */
     @TableField("name")
     private String name;
 
-    /** 工作区唯一标识 slug */
-    @TableField("slug")
-    private String slug;
+    /** Skill 正文内容 */
+    @TableField("content")
+    private String content;
 
     /** 创建时间 */
     @TableField("created_at")
@@ -38,10 +42,12 @@ public class WorkspaceEntity {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public Long getWorkspaceId() { return workspaceId; }
+    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-    public String getSlug() { return slug; }
-    public void setSlug(String slug) { this.slug = slug; }
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

@@ -7,21 +7,25 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-/** 工作区表 rb_workspace */
-@TableName("rb_workspace")
-public class WorkspaceEntity {
+/** 项目表 rb_project */
+@TableName("rb_project")
+public class ProjectEntity {
 
-    /** 工作区id */
+    /** 项目id */
     @TableId("id")
     private Long id;
 
-    /** 工作区名称 */
+    /** 工作区id */
+    @TableField("workspace_id")
+    private Long workspaceId;
+
+    /** 项目名称 */
     @TableField("name")
     private String name;
 
-    /** 工作区唯一标识 slug */
-    @TableField("slug")
-    private String slug;
+    /** 本机绝对路径（为空则走沙箱 workdir） */
+    @TableField("local_path")
+    private String localPath;
 
     /** 创建时间 */
     @TableField("created_at")
@@ -38,10 +42,12 @@ public class WorkspaceEntity {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public Long getWorkspaceId() { return workspaceId; }
+    public void setWorkspaceId(Long workspaceId) { this.workspaceId = workspaceId; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-    public String getSlug() { return slug; }
-    public void setSlug(String slug) { this.slug = slug; }
+    public String getLocalPath() { return localPath; }
+    public void setLocalPath(String localPath) { this.localPath = localPath; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
