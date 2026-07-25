@@ -1,0 +1,334 @@
+package com.rudder.server.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.rudder.server.auth.AuthPrincipal;
+import com.rudder.server.domain.AgentEntity;
+import com.rudder.server.domain.AgentSkillEntity;
+import com.rudder.server.domain.InboxEntity;
+import com.rudder.server.domain.ProjectEntity;
+import com.rudder.server.domain.RuntimeEntity;
+import com.rudder.server.domain.SkillEntity;
+import com.rudder.server.mapper.AgentMapper;
+import com.rudder.server.mapper.AgentSkillMapper;
+import com.rudder.server.mapper.InboxMapper;
+import com.rudder.server.mapper.ProjectMapper;
+import com.rudder.server.mapper.RuntimeMapper;
+import com.rudder.server.mapper.SkillMapper;
+import com.rudder.server.ws.NettyWsHub;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+/** Agent / Skill / Project / Runtime / Inbox 业务。 */
+@Service
+@RequiredArgsConstructor
+public class ResourceService {
+
+    private final AgentMapper agentMapper;
+    private final SkillMapper skillMapper;
+    private final AgentSkillMapper agentSkillMapper;
+    private final ProjectMapper projectMapper;
+    private final RuntimeMapper runtimeMapper;
+    private final InboxMapper inboxMapper;
+    private final NettyWsHub wsHub;
+
+    // -------- Agent --------
+    public List<Map<String, Object>> listAgents(AuthPrincipal p) {
+        return agentMapper.selectList(new LambdaQueryWrapper<AgentEntity>()
+                        .eq(AgentEntity::getWorkspaceId, p.workspaceId())
+                        .orderByDesc(AgentEntity::getId))
+                .stream().map(this::agentView).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public Map<String, Object> createAgent(AuthPrincipal p, Map<String, Object> body) {
+        String provider = str(body.get("provider"));
+        if (!WorkdirResolver.isAllowedProvider(provider)) {
+            throw new IllegalArgumentException("不支持的 Provider，请选择 cursor / claude_code / codex");
+        }
+        AgentEntity a = new AgentEntity();
+        a.setWorkspaceId(p.workspaceId());
+        a.setName(require(body.get("name"), "名称不能为空"));
+        a.setAvatar(str(body.get("avatar")));
+        a.setDescription(str(body.get("description")));
+        a.setInstructions(str(body.get("instructions")));
+        a.setProvider(provider.toLowerCase());
+        a.setRuntimeId(asLong(body.get("runtimeId")));
+        a.setMaxConcurrency(body.get("maxConcurrency") == null ? 1 : ((Number) body.get("maxConcurrency")).intValue());
+        a.setStatus("idle");
+        a.setCreatedAt(LocalDateTime.now());
+        a.setUpdatedAt(LocalDateTime.now());
+        agentMapper.insert(a);
+        bindSkills(a.getId(), body.get("skillIds"));
+        return agentView(a);
+    }
+
+    @Transactional
+    public Map<String, Object> updateAgent(AuthPrincipal p, Long id, Map<String, Object> body) {
+        AgentEntity a = requireAgent(p, id);
+        if (body.containsKey("name")) a.setName(require(body.get("name"), "名称不能为空"));
+        if (body.containsKey("instructions")) a.setInstructions(str(body.get("instructions")));
+        if (body.containsKey("description")) a.setDescription(str(body.get("description")));
+        if (body.containsKey("provider")) {
+            String provider = str(body.get("provider"));
+            if (!WorkdirResolver.isAllowedProvider(provider)) {
+                throw new IllegalArgumentException("不支持的 Provider");
+            }
+            a.setProvider(provider.toLowerCase());
+        }
+        if (body.containsKey("runtimeId")) a.setRuntimeId(asLong(body.get("runtimeId")));
+        if (body.containsKey("skillIds")) {
+            agentSkillMapper.delete(new LambdaQueryWrapper<AgentSkillEntity>().eq(AgentSkillEntity::getAgentId, id));
+            bindSkills(id, body.get("skillIds"));
+        }
+        a.setUpdatedAt(LocalDateTime.now());
+        agentMapper.updateById(a);
+        return agentView(a);
+    }
+
+    public void deleteAgent(AuthPrincipal p, Long id) {
+        requireAgent(p, id);
+        agentMapper.deleteById(id);
+    }
+
+    public AgentEntity requireAgent(AuthPrincipal p, Long id) {
+        AgentEntity a = agentMapper.selectById(id);
+        if (a == null || !Objects.equals(a.getWorkspaceId(), p.workspaceId())) {
+            throw new IllegalArgumentException("Agent 不存在");
+        }
+        return a;
+    }
+
+    private void bindSkills(Long agentId, Object skillIds) {
+        if (!(skillIds instanceof List<?> list)) return;
+        for (Object o : list) {
+            Long sid = asLong(o);
+            if (sid == null) continue;
+            AgentSkillEntity rel = new AgentSkillEntity();
+            rel.setAgentId(agentId);
+            rel.setSkillId(sid);
+            rel.setCreatedAt(LocalDateTime.now());
+            agentSkillMapper.insert(rel);
+        }
+    }
+
+    private Map<String, Object> agentView(AgentEntity a) {
+        List<Long> skillIds = agentSkillMapper.selectList(new LambdaQueryWrapper<AgentSkillEntity>()
+                        .eq(AgentSkillEntity::getAgentId, a.getId()))
+                .stream().map(AgentSkillEntity::getSkillId).collect(Collectors.toList());
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", String.valueOf(a.getId()));
+        m.put("name", a.getName());
+        m.put("avatar", a.getAvatar());
+        m.put("description", a.getDescription());
+        m.put("instructions", a.getInstructions());
+        m.put("provider", a.getProvider());
+        m.put("runtimeId", a.getRuntimeId() == null ? null : String.valueOf(a.getRuntimeId()));
+        m.put("maxConcurrency", a.getMaxConcurrency());
+        m.put("status", a.getStatus());
+        m.put("skillIds", skillIds.stream().map(String::valueOf).collect(Collectors.toList()));
+        return m;
+    }
+
+    // -------- Skill --------
+    public List<Map<String, Object>> listSkills(AuthPrincipal p) {
+        return skillMapper.selectList(new LambdaQueryWrapper<SkillEntity>()
+                        .eq(SkillEntity::getWorkspaceId, p.workspaceId())
+                        .orderByDesc(SkillEntity::getId))
+                .stream().map(s -> Map.<String, Object>of(
+                        "id", String.valueOf(s.getId()),
+                        "name", s.getName(),
+                        "content", s.getContent()
+                )).collect(Collectors.toList());
+    }
+
+    public Map<String, Object> createSkill(AuthPrincipal p, Map<String, Object> body) {
+        SkillEntity s = new SkillEntity();
+        s.setWorkspaceId(p.workspaceId());
+        s.setName(require(body.get("name"), "名称不能为空"));
+        s.setContent(require(body.get("content"), "内容不能为空"));
+        s.setCreatedAt(LocalDateTime.now());
+        s.setUpdatedAt(LocalDateTime.now());
+        skillMapper.insert(s);
+        return Map.of("id", String.valueOf(s.getId()), "name", s.getName(), "content", s.getContent());
+    }
+
+    public List<SkillEntity> skillsOfAgent(Long agentId) {
+        List<Long> ids = agentSkillMapper.selectList(new LambdaQueryWrapper<AgentSkillEntity>()
+                        .eq(AgentSkillEntity::getAgentId, agentId))
+                .stream().map(AgentSkillEntity::getSkillId).toList();
+        if (ids.isEmpty()) return List.of();
+        return skillMapper.selectBatchIds(ids);
+    }
+
+    // -------- Project --------
+    public List<Map<String, Object>> listProjects(AuthPrincipal p) {
+        return projectMapper.selectList(new LambdaQueryWrapper<ProjectEntity>()
+                        .eq(ProjectEntity::getWorkspaceId, p.workspaceId())
+                        .orderByDesc(ProjectEntity::getId))
+                .stream().map(this::projectView).collect(Collectors.toList());
+    }
+
+    public Map<String, Object> createProject(AuthPrincipal p, Map<String, Object> body) {
+        String localPath = str(body.get("localPath"));
+        if (StringUtils.hasText(localPath)) {
+            WorkdirResolver.validateLocalPath(localPath);
+        }
+        ProjectEntity pr = new ProjectEntity();
+        pr.setWorkspaceId(p.workspaceId());
+        pr.setName(require(body.get("name"), "名称不能为空"));
+        pr.setLocalPath(StringUtils.hasText(localPath) ? localPath : null);
+        pr.setCreatedAt(LocalDateTime.now());
+        pr.setUpdatedAt(LocalDateTime.now());
+        projectMapper.insert(pr);
+        return projectView(pr);
+    }
+
+    public ProjectEntity requireProject(AuthPrincipal p, Long id) {
+        if (id == null) return null;
+        ProjectEntity pr = projectMapper.selectById(id);
+        if (pr == null || !Objects.equals(pr.getWorkspaceId(), p.workspaceId())) {
+            throw new IllegalArgumentException("项目不存在");
+        }
+        return pr;
+    }
+
+    private Map<String, Object> projectView(ProjectEntity pr) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", String.valueOf(pr.getId()));
+        m.put("name", pr.getName());
+        m.put("localPath", pr.getLocalPath());
+        return m;
+    }
+
+    // -------- Runtime --------
+    public List<Map<String, Object>> listRuntimes(AuthPrincipal p) {
+        return runtimeMapper.selectList(new LambdaQueryWrapper<RuntimeEntity>()
+                        .eq(RuntimeEntity::getWorkspaceId, p.workspaceId())
+                        .orderByDesc(RuntimeEntity::getLastHeartbeatAt))
+                .stream().map(this::runtimeView).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public Map<String, Object> upsertRuntime(Long workspaceId, String daemonId, String provider,
+                                             String hostName, String metaJson) {
+        RuntimeEntity existing = runtimeMapper.selectOne(new LambdaQueryWrapper<RuntimeEntity>()
+                .eq(RuntimeEntity::getWorkspaceId, workspaceId)
+                .eq(RuntimeEntity::getDaemonId, daemonId)
+                .eq(RuntimeEntity::getProvider, provider)
+                .last("LIMIT 1"));
+        LocalDateTime now = LocalDateTime.now();
+        if (existing == null) {
+            existing = new RuntimeEntity();
+            existing.setWorkspaceId(workspaceId);
+            existing.setDaemonId(daemonId);
+            existing.setProvider(provider);
+            existing.setHostName(hostName);
+            existing.setStatus("online");
+            existing.setLastHeartbeatAt(now);
+            existing.setMetaJson(metaJson);
+            existing.setCreatedAt(now);
+            existing.setUpdatedAt(now);
+            runtimeMapper.insert(existing);
+        } else {
+            existing.setHostName(hostName);
+            existing.setStatus("online");
+            existing.setLastHeartbeatAt(now);
+            existing.setMetaJson(metaJson);
+            existing.setUpdatedAt(now);
+            runtimeMapper.updateById(existing);
+        }
+        wsHub.publish(workspaceId, Map.of("type", "runtime.updated", "runtime", runtimeView(existing)));
+        return runtimeView(existing);
+    }
+
+    public void heartbeat(Long runtimeId) {
+        RuntimeEntity r = runtimeMapper.selectById(runtimeId);
+        if (r == null) return;
+        r.setLastHeartbeatAt(LocalDateTime.now());
+        r.setStatus("online");
+        r.setUpdatedAt(LocalDateTime.now());
+        runtimeMapper.updateById(r);
+    }
+
+    private Map<String, Object> runtimeView(RuntimeEntity r) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", String.valueOf(r.getId()));
+        m.put("daemonId", r.getDaemonId());
+        m.put("provider", r.getProvider());
+        m.put("hostName", r.getHostName());
+        m.put("status", r.getStatus());
+        m.put("lastHeartbeatAt", r.getLastHeartbeatAt() == null ? null : r.getLastHeartbeatAt().toString());
+        return m;
+    }
+
+    // -------- Inbox --------
+    public void notifyUser(Long workspaceId, Long userId, String title, String body, String refType, Long refId) {
+        InboxEntity inbox = new InboxEntity();
+        inbox.setWorkspaceId(workspaceId);
+        inbox.setUserId(userId);
+        inbox.setTitle(title);
+        inbox.setBody(body == null ? "" : body);
+        inbox.setRefType(refType);
+        inbox.setRefId(refId);
+        inbox.setReadFlag(0);
+        inbox.setCreatedAt(LocalDateTime.now());
+        inboxMapper.insert(inbox);
+        wsHub.publish(workspaceId, Map.of("type", "inbox.created", "title", title));
+    }
+
+    public List<Map<String, Object>> listInbox(AuthPrincipal p) {
+        return inboxMapper.selectList(new LambdaQueryWrapper<InboxEntity>()
+                        .eq(InboxEntity::getUserId, p.userId())
+                        .orderByDesc(InboxEntity::getId)
+                        .last("LIMIT 100"))
+                .stream().map(i -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", String.valueOf(i.getId()));
+                    m.put("title", i.getTitle());
+                    m.put("body", i.getBody());
+                    m.put("read", i.getReadFlag() != null && i.getReadFlag() == 1);
+                    m.put("createdAt", i.getCreatedAt().toString());
+                    return m;
+                }).collect(Collectors.toList());
+    }
+
+    public long unreadCount(AuthPrincipal p) {
+        return inboxMapper.selectCount(new LambdaQueryWrapper<InboxEntity>()
+                .eq(InboxEntity::getUserId, p.userId())
+                .eq(InboxEntity::getReadFlag, 0));
+    }
+
+    public void markRead(AuthPrincipal p, Long id) {
+        InboxEntity i = inboxMapper.selectById(id);
+        if (i == null || !Objects.equals(i.getUserId(), p.userId())) {
+            throw new IllegalArgumentException("通知不存在");
+        }
+        i.setReadFlag(1);
+        inboxMapper.updateById(i);
+    }
+
+    private static String require(Object v, String msg) {
+        String s = str(v);
+        if (!StringUtils.hasText(s)) throw new IllegalArgumentException(msg);
+        return s;
+    }
+
+    private static String str(Object v) {
+        return v == null ? "" : String.valueOf(v).trim();
+    }
+
+    private static Long asLong(Object v) {
+        if (v == null || "".equals(v)) return null;
+        if (v instanceof Number n) return n.longValue();
+        return Long.parseLong(String.valueOf(v));
+    }
+}

@@ -5,6 +5,8 @@ server:
 rudder:
   persistence:
     enabled: false
+  ws:
+    port: 8081
 
 spring:
   application:
