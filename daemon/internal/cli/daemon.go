@@ -2,11 +2,16 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"syscall"
+	"time"
 
+	"github.com/dawangsky/rudder/daemon/internal/config"
+	"github.com/dawangsky/rudder/daemon/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
-// newDaemonCmd 管理本机常驻执行器（关 Desktop 窗口后仍可跑任务）。
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -16,15 +21,34 @@ func newDaemonCmd() *cobra.Command {
 		Use:   "start",
 		Short: "启动 Daemon：探测 CLI、注册 Runtime、轮询领任务",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("daemon start stub: server=%s（探测/心跳/领任务后续实现）\n", serverBaseURL)
-			return nil
+			return daemon.Run(serverBaseURL)
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "stop",
 		Short: "停止 Daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("daemon stop stub")
+			pidPath, err := config.PidPath()
+			if err != nil {
+				return err
+			}
+			raw, err := os.ReadFile(pidPath)
+			if err != nil {
+				fmt.Println("daemon not running")
+				return nil
+			}
+			pid, _ := strconv.Atoi(string(raw))
+			if pid <= 0 {
+				return fmt.Errorf("invalid pid")
+			}
+			proc, err := os.FindProcess(pid)
+			if err != nil {
+				return err
+			}
+			_ = proc.Signal(syscall.SIGTERM)
+			time.Sleep(300 * time.Millisecond)
+			_ = os.Remove(pidPath)
+			fmt.Println("daemon stop requested")
 			return nil
 		},
 	})
@@ -32,7 +56,16 @@ func newDaemonCmd() *cobra.Command {
 		Use:   "status",
 		Short: "查看 Daemon 状态",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("daemon status stub: not running")
+			pidPath, err := config.PidPath()
+			if err != nil {
+				return err
+			}
+			raw, err := os.ReadFile(pidPath)
+			if err != nil {
+				fmt.Println("daemon status: not running")
+				return nil
+			}
+			fmt.Printf("daemon status: running pid=%s\n", string(raw))
 			return nil
 		},
 	})
