@@ -8,10 +8,10 @@
 
 ## 2. 认证与工作区
 
-- [ ] 2.1 实现邮箱注册/登录 API 与密码哈希
-- [ ] 2.2 用户会话 Token 与 Daemon Token 分离签发
-- [ ] 2.3 默认 Workspace 创建；表结构含 workspace_id/成员/角色预留
-- [ ] 2.4 Desktop 登录页对接认证
+- [x] 2.1 实现邮箱注册/登录 API 与密码哈希
+- [x] 2.2 用户会话 Token 与 Daemon Token 分离签发
+- [x] 2.3 默认 Workspace 创建；表结构含 workspace_id/成员/角色预留
+- [x] 2.4 Desktop 登录页对接认证
 
 ## 3. Desktop UI 壳
 
