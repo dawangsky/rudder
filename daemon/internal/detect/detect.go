@@ -67,25 +67,26 @@ func activeCatalog() []ProviderSpec {
 }
 
 // ApplyRemoteCatalog 用 Server 下发的已启用协议覆盖本地探测目录。
+// specs == nil：恢复默认种子；非 nil（含空切片）：严格按 Server 目录（空则仅 stub）。
 func ApplyRemoteCatalog(specs []ProviderSpec) {
 	catalogMu.Lock()
 	defer catalogMu.Unlock()
-	if len(specs) == 0 {
+	if specs == nil {
 		remoteCatalog = nil
 		ProviderBins = binsFrom(Catalog)
 		return
 	}
-	remoteCatalog = make([]ProviderSpec, len(specs))
-	copy(remoteCatalog, specs)
-	// stub 始终保留
-	hasStub := false
-	for _, s := range remoteCatalog {
-		if s.ID == "stub" {
-			hasStub = true
-			break
+	remoteCatalog = make([]ProviderSpec, 0, len(specs)+1)
+	seen := map[string]bool{}
+	for _, s := range specs {
+		id := strings.TrimSpace(s.ID)
+		if id == "" || seen[id] {
+			continue
 		}
+		seen[id] = true
+		remoteCatalog = append(remoteCatalog, ProviderSpec{ID: id, Bins: s.Bins})
 	}
-	if !hasStub {
+	if !seen["stub"] {
 		remoteCatalog = append(remoteCatalog, ProviderSpec{ID: "stub", Bins: []string{}})
 	}
 	ProviderBins = binsFrom(remoteCatalog)

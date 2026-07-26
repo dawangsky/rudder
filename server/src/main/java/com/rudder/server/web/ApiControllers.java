@@ -227,13 +227,26 @@ public class ApiControllers {
 
     @PutMapping("/protocols/{code}")
     public Map<String, Object> updateProtocol(@PathVariable String code, @RequestBody Map<String, Object> body) {
-        return protocolService.updateProtocol(session(), code, body);
+        Map<String, Object> updated = protocolService.updateProtocol(session(), code, body);
+        // 停用后立即清掉该协议相关运行时，避免仍显示「已探测」
+        if (body.containsKey("enabled") && !isTruthy(body.get("enabled"))) {
+            resourceService.purgeRuntimesForProtocol(session(), code);
+        }
+        return updated;
     }
 
     @DeleteMapping("/protocols/{code}")
     public Map<String, Object> deleteProtocol(@PathVariable String code) {
         protocolService.deleteProtocol(session(), code);
+        resourceService.purgeRuntimesForProtocol(session(), code);
         return Map.of("ok", true);
+    }
+
+    private static boolean isTruthy(Object v) {
+        if (v instanceof Boolean b) return b;
+        if (v instanceof Number n) return n.intValue() != 0;
+        String s = v == null ? "" : String.valueOf(v).trim().toLowerCase();
+        return "1".equals(s) || "true".equals(s) || "yes".equals(s);
     }
 
     @GetMapping("/daemon/protocols")

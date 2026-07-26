@@ -109,7 +109,8 @@ func syncProviders(
 	runtimeIDs map[string]string,
 	customCmds map[string]string,
 ) {
-	if remote, err := api.ListProtocols(); err == nil && len(remote) > 0 {
+	if remote, err := api.ListProtocols(); err == nil {
+		// 成功拉取则严格按工作区启用目录探测（即使为空也不回退全量种子）
 		specs := make([]detect.ProviderSpec, 0, len(remote))
 		for _, r := range remote {
 			code := strings.TrimSpace(r.Code)
@@ -144,10 +145,21 @@ func syncProviders(
 				"kind":    "stub",
 			})
 			wantMeta[p] = string(meta)
+			continue
 		}
+		// 本地曾启用、但工作区已停用的协议：从本机列表移除且不再注册
+		_ = config.RemoveEnabledProvider(p)
 	}
 	customs, _ := config.LoadCustomRuntimes()
 	for _, c := range customs {
+		base := c.BaseProvider
+		if base == "" {
+			base = detect.BaseProvider(c.ProviderKey)
+		}
+		if !detect.IsBuiltin(base) && base != "stub" {
+			fmt.Printf("skip custom=%s: base protocol %s disabled or unknown\n", c.ProviderKey, base)
+			continue
+		}
 		if err := detect.ValidateCommand(c.Command); err != nil {
 			fmt.Printf("skip custom=%s: %v\n", c.ProviderKey, err)
 			continue

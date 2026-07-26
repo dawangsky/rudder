@@ -729,9 +729,38 @@ public class ResourceService {
         }
     }
 
+    /**
+     * 协议停用/删除后：移除该协议及以其为 base 的自定义运行时。
+     */
+    @Transactional
+    public void purgeRuntimesForProtocol(AuthPrincipal p, String protocolCode) {
+        if (p.workspaceId() == null || !StringUtils.hasText(protocolCode)) return;
+        String code = protocolCode.toLowerCase().trim();
+        List<RuntimeEntity> list = runtimeMapper.selectList(new LambdaQueryWrapper<RuntimeEntity>()
+                .eq(RuntimeEntity::getWorkspaceId, p.workspaceId()));
+        for (RuntimeEntity r : list) {
+            String provider = r.getProvider() == null ? "" : r.getProvider().toLowerCase();
+            String base = protocolService.baseProvider(p.workspaceId(), provider);
+            if (!code.equals(provider) && !code.equals(base)) {
+                continue;
+            }
+            archiveAgentsBoundToRuntime(p, r.getId());
+            runtimeMapper.deleteById(r.getId());
+            wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(r.getId())));
+        }
+    }
+
     public void heartbeat(Long runtimeId) {
         RuntimeEntity r = runtimeMapper.selectById(runtimeId);
         if (r == null) return;
+        // 协议已停用则不再保活，并删除残留运行时
+        if (!protocolService.isAllowedProvider(r.getWorkspaceId(), r.getProvider())) {
+            AuthPrincipal ctx = new AuthPrincipal(0L, "", "daemon", r.getWorkspaceId());
+            archiveAgentsBoundToRuntime(ctx, r.getId());
+            runtimeMapper.deleteById(r.getId());
+            wsHub.publish(r.getWorkspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(r.getId())));
+            return;
+        }
         r.setLastHeartbeatAt(LocalDateTime.now());
         r.setStatus("online");
         r.setUpdatedAt(LocalDateTime.now());
