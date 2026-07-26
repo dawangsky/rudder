@@ -2,9 +2,11 @@ package com.rudder.server.service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 工作目录解析：项目本地路径优先，否则沙箱路径。
@@ -15,6 +17,23 @@ public final class WorkdirResolver {
     private static final Set<String> DENY_PREFIXES = Set.of(
             "/", "/etc", "/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc"
     );
+
+    /**
+     * 与 Daemon detect.Catalog 保持一致的基础协议白名单。
+     * 含主流（OpenCode / Gemini / Copilot 等）与国产（CodeBuddy / Qwen / Kimi / Qoder / Trae 等）。
+     */
+    private static final List<String> BASE_PROVIDERS = List.of(
+            "cursor", "claude_code", "codex", "opencode", "gemini", "copilot", "aider", "goose",
+            "codebuddy", "qwen", "kimi", "qoder", "traecli", "kiro", "grok", "hermes", "pi",
+            "openclaw", "antigravity", "deveco", "stub"
+    );
+
+    /** 按长度降序，保证 custom_claude_code_xxx 先匹配 claude_code */
+    private static final List<String> BASE_PROVIDERS_BY_LEN = BASE_PROVIDERS.stream()
+            .sorted(Comparator.comparingInt(String::length).reversed().thenComparing(s -> s))
+            .collect(Collectors.toList());
+
+    private static final Set<String> BASE_PROVIDER_SET = Set.copyOf(BASE_PROVIDERS);
 
     private WorkdirResolver() {
     }
@@ -76,17 +95,12 @@ public final class WorkdirResolver {
             return false;
         }
         String p = provider.toLowerCase(Locale.ROOT);
-        if (Set.of("cursor", "claude_code", "codex", "stub").contains(p)) {
+        if (BASE_PROVIDER_SET.contains(p)) {
             return true;
         }
         // 自定义运行时：custom_<base>_<hash8>
         if (p.startsWith("custom_")) {
-            String rest = p.substring("custom_".length());
-            for (String base : List.of("claude_code", "cursor", "codex", "stub")) {
-                if (rest.startsWith(base + "_")) {
-                    return true;
-                }
-            }
+            return BASE_PROVIDER_SET.contains(baseProvider(p));
         }
         return false;
     }
@@ -101,11 +115,16 @@ public final class WorkdirResolver {
             return p;
         }
         String rest = p.substring("custom_".length());
-        for (String base : List.of("claude_code", "cursor", "codex", "stub")) {
+        for (String base : BASE_PROVIDERS_BY_LEN) {
             if (rest.startsWith(base + "_")) {
                 return base;
             }
         }
         return p;
+    }
+
+    /** 供测试与文档列出支持的基础协议。 */
+    public static List<String> allowedBaseProviders() {
+        return BASE_PROVIDERS;
     }
 }

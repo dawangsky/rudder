@@ -37,10 +37,14 @@ const onlineRuntimes = computed(() =>
 )
 
 const providerChoices = computed(() => {
-  const online = new Set(onlineRuntimes.value.map((r) => r.provider))
-  return PROVIDERS.filter((p) => p.value !== 'stub' || online.has('stub')).map((p) => ({
+  return PROVIDERS.filter((p) => {
+    return onlineRuntimes.value.some((r) => {
+      const base = r.baseProvider || baseProviderOf(r.provider)
+      return r.provider === p.value || base === p.value
+    })
+  }).map((p) => ({
     ...p,
-    online: online.has(p.value),
+    online: true,
   }))
 })
 

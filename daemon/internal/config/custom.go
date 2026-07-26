@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dawangsky/rudder/daemon/internal/detect"
 )
 
-// CustomRuntime 本机自定义运行时（覆盖启动命令；基础协议仍为 cursor/claude_code/codex）。
+// CustomRuntime 本机自定义运行时（覆盖启动命令；基础协议见 detect.Catalog）。
 type CustomRuntime struct {
 	ProviderKey  string `json:"providerKey"`
 	BaseProvider string `json:"baseProvider"`
@@ -108,18 +110,5 @@ func IsCustomProvider(provider string) bool {
 
 // BaseFromCustomProvider 从 custom_<base>_<hash> 解析基础协议。
 func BaseFromCustomProvider(provider string) string {
-	if !IsCustomProvider(provider) {
-		return provider
-	}
-	rest := strings.TrimPrefix(provider, "custom_")
-	for _, base := range []string{"claude_code", "cursor", "codex", "stub"} {
-		if strings.HasPrefix(rest, base+"_") {
-			return base
-		}
-	}
-	parts := strings.Split(rest, "_")
-	if len(parts) >= 2 {
-		return parts[0]
-	}
-	return rest
+	return detect.BaseProvider(provider)
 }

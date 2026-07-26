@@ -25,7 +25,7 @@ public class RuntimeEntity {
     @TableField("daemon_id")
     private String daemonId;
 
-    /** Provider：cursor / claude_code / codex / stub */
+    /** Provider：cursor / claude_code / codex / opencode / qwen / … */
     @TableField("provider")
     private String provider;
 

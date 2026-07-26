@@ -38,12 +38,40 @@ export function modelOptionsForProvider(provider?: string): ModelOption[] {
       { value: 'gpt-5', label: 'GPT-5' },
     ]
   }
-  if (p === 'codex' || p.startsWith('openai') || p === 'gpt') {
+  if (p === 'codex' || p.startsWith('openai') || p === 'gpt' || p === 'copilot') {
     return [
       { value: 'default', label: '默认' },
       { value: 'gpt-5', label: 'GPT-5' },
       { value: 'o3', label: 'o3' },
       { value: 'gpt-4.1', label: 'GPT-4.1' },
+    ]
+  }
+  if (p === 'opencode' || p === 'gemini') {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+      { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    ]
+  }
+  if (p === 'qwen' || p === 'qoder' || p === 'codebuddy') {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'qwen3-coder', label: 'Qwen3 Coder' },
+      { value: 'qwen-max', label: 'Qwen Max' },
+    ]
+  }
+  if (p === 'kimi') {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'kimi-k2', label: 'Kimi K2' },
+      { value: 'moonshot-v1', label: 'Moonshot V1' },
+    ]
+  }
+  if (p === 'traecli' || p === 'deveco') {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'doubao', label: '豆包' },
+      { value: 'deepseek', label: 'DeepSeek' },
     ]
   }
   return [{ value: 'default', label: '默认' }]

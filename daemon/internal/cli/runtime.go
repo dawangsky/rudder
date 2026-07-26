@@ -52,7 +52,7 @@ func newRuntimeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	add.Flags().StringVar(&addProvider, "provider", "", "cursor | claude_code | codex | stub")
+	add.Flags().StringVar(&addProvider, "provider", "", "协议 id，如 cursor / opencode / qwen / codebuddy …")
 	_ = add.MarkFlagRequired("provider")
 
 	var removeProvider string
@@ -135,8 +135,8 @@ func newRuntimeCmd() *cobra.Command {
 			customBase = strings.TrimSpace(customBase)
 			customName = strings.TrimSpace(customName)
 			customCmd = strings.TrimSpace(customCmd)
-			if customBase == "" || !detect.IsBuiltin(customBase) {
-				return fmt.Errorf("--base 须为 cursor / claude_code / codex")
+			if customBase == "" || (!detect.IsBuiltin(customBase) && customBase != "stub") {
+				return fmt.Errorf("--base 须为已支持基础协议之一: %s", strings.Join(detect.BuiltinProviders(), ", "))
 			}
 			if customName == "" {
 				return fmt.Errorf("--name 不能为空")
@@ -184,7 +184,7 @@ func newRuntimeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	addCustom.Flags().StringVar(&customBase, "base", "", "基础协议：cursor | claude_code | codex")
+	addCustom.Flags().StringVar(&customBase, "base", "", "基础协议：cursor / opencode / qwen / codebuddy …")
 	addCustom.Flags().StringVar(&customName, "name", "", "显示名称（必填）")
 	addCustom.Flags().StringVar(&customCmd, "command", "", "启动命令（必填，须本机可执行）")
 	addCustom.Flags().StringVar(&customDesc, "description", "", "描述（可选）")
@@ -224,7 +224,7 @@ func newRuntimeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	detectCmd.Flags().StringVar(&detectProvider, "provider", "", "cursor | claude_code | codex | stub")
+	detectCmd.Flags().StringVar(&detectProvider, "provider", "", "协议 id，如 cursor / opencode / qwen …")
 	_ = detectCmd.MarkFlagRequired("provider")
 
 	var enableProvider string
@@ -246,7 +246,7 @@ func newRuntimeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	enableCmd.Flags().StringVar(&enableProvider, "provider", "", "cursor | claude_code | codex | stub")
+	enableCmd.Flags().StringVar(&enableProvider, "provider", "", "协议 id，如 cursor / opencode / qwen …")
 	_ = enableCmd.MarkFlagRequired("provider")
 
 	cmd.AddCommand(add, remove, list, detectCmd, enableCmd, addCustom, validateCmd)

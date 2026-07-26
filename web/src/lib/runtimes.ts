@@ -34,23 +34,62 @@ export type LocalMachineHint = {
   online?: boolean
 }
 
-export const PROVIDERS = [
-  { value: 'cursor', label: 'Cursor', short: 'Cursor' },
-  { value: 'claude_code', label: 'Claude Code', short: 'Claude' },
-  { value: 'codex', label: 'Codex', short: 'Codex' },
-  { value: 'stub', label: 'Stub', short: 'Stub' },
+export type ProviderMeta = {
+  value: string
+  label: string
+  short: string
+  /** intl | cn | test */
+  region?: 'intl' | 'cn' | 'test'
+  /** 自定义运行时命令占位示例 */
+  commandHint?: string
+}
+
+/**
+ * 与 Daemon detect.Catalog / Server WorkdirResolver 保持一致。
+ * 含主流国际协议与国产 coding agent CLI。
+ */
+export const PROVIDERS: readonly ProviderMeta[] = [
+  { value: 'claude_code', label: 'Claude Code', short: 'Claude', region: 'intl', commandHint: '例如：claude -p "{prompt}"' },
+  { value: 'cursor', label: 'Cursor', short: 'Cursor', region: 'intl', commandHint: '例如：agent "{prompt}"' },
+  { value: 'codex', label: 'Codex', short: 'Codex', region: 'intl', commandHint: '例如：codex exec "{prompt}"' },
+  { value: 'opencode', label: 'OpenCode', short: 'OpenCode', region: 'intl', commandHint: '例如：opencode run "{prompt}"' },
+  { value: 'gemini', label: 'Gemini CLI', short: 'Gemini', region: 'intl', commandHint: '例如：gemini -p "{prompt}"' },
+  { value: 'copilot', label: 'GitHub Copilot', short: 'Copilot', region: 'intl', commandHint: '例如：copilot -p "{prompt}"' },
+  { value: 'aider', label: 'Aider', short: 'Aider', region: 'intl', commandHint: '例如：aider --message "{prompt}" --yes-always' },
+  { value: 'goose', label: 'Goose', short: 'Goose', region: 'intl', commandHint: '例如：goose run "{prompt}"' },
+  { value: 'codebuddy', label: 'CodeBuddy', short: 'CodeBuddy', region: 'cn', commandHint: '例如：codebuddy -p "{prompt}"' },
+  { value: 'qwen', label: 'Qwen Code', short: 'Qwen', region: 'cn', commandHint: '例如：qwen -p "{prompt}"' },
+  { value: 'kimi', label: 'Kimi Code', short: 'Kimi', region: 'cn', commandHint: '例如：kimi -p "{prompt}"' },
+  { value: 'qoder', label: 'Qoder', short: 'Qoder', region: 'cn', commandHint: '例如：qoder -p "{prompt}"' },
+  { value: 'traecli', label: 'Trae CLI', short: 'Trae', region: 'cn', commandHint: '例如：traecli -p "{prompt}"' },
+  { value: 'kiro', label: 'Kiro', short: 'Kiro', region: 'intl', commandHint: '例如：kiro -p "{prompt}"' },
+  { value: 'grok', label: 'Grok', short: 'Grok', region: 'intl', commandHint: '例如：grok -p "{prompt}"' },
+  { value: 'hermes', label: 'Hermes', short: 'Hermes', region: 'intl', commandHint: '例如：hermes -p "{prompt}"' },
+  { value: 'pi', label: 'Pi', short: 'Pi', region: 'intl', commandHint: '例如：pi -p "{prompt}"' },
+  { value: 'openclaw', label: 'OpenClaw', short: 'OpenClaw', region: 'intl', commandHint: '例如：openclaw -p "{prompt}"' },
+  { value: 'antigravity', label: 'Antigravity', short: 'Antigravity', region: 'intl', commandHint: '例如：antigravity -p "{prompt}"' },
+  { value: 'deveco', label: 'DevEco', short: 'DevEco', region: 'cn', commandHint: '例如：deveco -p "{prompt}"' },
+  { value: 'stub', label: 'Stub', short: 'Stub', region: 'test', commandHint: '无需本机 CLI（测试用）' },
 ] as const
+
+/** 基础协议 id（按长度降序，解析 custom_<base>_<hash>） */
+export const BASE_PROVIDER_IDS = [...PROVIDERS.map((p) => p.value)].sort(
+  (a, b) => b.length - a.length || a.localeCompare(b),
+)
+
+/** 添加自定义运行时可选协议（不含 stub） */
+export const PROTOCOL_OPTIONS = PROVIDERS.filter((p) => p.value !== 'stub')
 
 export function baseProviderOf(provider: string) {
   if (!provider?.startsWith('custom_')) return provider
   const rest = provider.slice('custom_'.length)
-  for (const base of ['claude_code', 'cursor', 'codex', 'stub']) {
+  for (const base of BASE_PROVIDER_IDS) {
     if (rest.startsWith(`${base}_`)) return base
   }
   return provider
 }
 
-export function providerMeta(code: string) {
+export function providerMeta(code: string): ProviderMeta {
   const base = baseProviderOf(code)
   return PROVIDERS.find((p) => p.value === base) || { value: code, label: code, short: code }
 }
@@ -71,6 +110,10 @@ export function isCustomRuntime(r: Pick<Runtime, 'provider' | 'kind'>) {
 
 export function iconProvider(r: Pick<Runtime, 'provider' | 'baseProvider'>) {
   return r.baseProvider || baseProviderOf(r.provider)
+}
+
+export function commandHintFor(provider: string) {
+  return providerMeta(provider).commandHint || '例如：my-cli "{prompt}"'
 }
 
 export function formatHeartbeat(iso?: string) {

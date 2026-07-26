@@ -39,7 +39,7 @@ func Run(serverOverride string) error {
 	syncProviders(api, daemonID, host, creds.Email, runtimeIDs, customCmds)
 
 	if len(runtimeIDs) == 0 {
-		fmt.Println("尚未发现可注册运行时。安装 Cursor / Claude Code / Codex 后约 10 秒内自动出现；也可添加自定义运行时")
+		fmt.Println("尚未发现可注册运行时。安装 OpenCode / Claude Code / Qwen / CodeBuddy 等后约 10 秒内自动出现；也可添加自定义运行时")
 	}
 
 	pidPath, _ := config.PidPath()

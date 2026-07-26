@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * L2：某台电脑上的运行时列表；点击行进入 L3 Provider 详情。
- * 「内置」= Cursor / Claude Code / Codex；Daemon 每 10s 探测本机安装并自动注册（删除后若仍安装会恢复）。
+ * 「内置」协议由 Daemon 每 10s 探测本机安装并自动注册（删除后若仍安装会恢复）。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -15,6 +15,8 @@ import RuntimeAgentAvatars from '@/components/RuntimeAgentAvatars.vue'
 import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import type { Agent } from '@/lib/agents'
 import {
+  PROTOCOL_OPTIONS,
+  commandHintFor,
   displayName,
   formatHeartbeat,
   groupMachines,
@@ -57,26 +59,8 @@ const ackDelete = ref(false)
 const removing = ref(false)
 let timer: number | undefined
 
-/** 第 1 步：选择基础协议（内置仍自动探测；此处用于自定义启动命令） */
-const PROTOCOL_OPTIONS = [
-  { value: 'claude_code', label: 'Claude', enabled: true },
-  { value: 'codebuddy', label: 'Codebuddy', enabled: false },
-  { value: 'codex', label: 'Codex', enabled: true },
-  { value: 'copilot', label: 'Copilot', enabled: false },
-  { value: 'opencode', label: 'Opencode', enabled: false },
-  { value: 'deveco', label: 'Deveco', enabled: false },
-  { value: 'openclaw', label: 'Openclaw', enabled: false },
-  { value: 'hermes', label: 'Hermes', enabled: false },
-  { value: 'pi', label: 'Pi', enabled: false },
-  { value: 'cursor', label: 'Cursor', enabled: true },
-  { value: 'kimi', label: 'Kimi', enabled: false },
-  { value: 'kiro', label: 'Kiro', enabled: false },
-  { value: 'antigravity', label: 'Antigravity', enabled: false },
-  { value: 'qoder', label: 'Qoder', enabled: false },
-  { value: 'traecli', label: 'Traecli', enabled: false },
-  { value: 'grok', label: 'Grok', enabled: false },
-  { value: 'qwen', label: 'Qwen', enabled: false },
-] as const
+/** 第 1 步：选择基础协议（内置自动探测；此处用于自定义启动命令） */
+// PROTOCOL_OPTIONS 来自 @/lib/runtimes
 
 const selectedProtocol = computed(
   () => PROTOCOL_OPTIONS.find((p) => p.value === provider.value) || PROTOCOL_OPTIONS[0],
@@ -301,12 +285,8 @@ function closeAddCustom() {
   err.value = ''
 }
 
-function selectProtocol(value: string, enabled: boolean) {
+function selectProtocol(value: string) {
   err.value = ''
-  if (!enabled) {
-    err.value = '该协议类型即将支持，请选择 Claude / Codex / Cursor'
-    return
-  }
   provider.value = value
   customName.value = ''
   customCommand.value = ''
@@ -314,12 +294,7 @@ function selectProtocol(value: string, enabled: boolean) {
   addStep.value = 2
 }
 
-const commandPlaceholder = computed(() => {
-  if (provider.value === 'cursor') return '例如：agent --model composer-2.5…'
-  if (provider.value === 'claude_code') return '例如：claude --model sonnet…'
-  if (provider.value === 'codex') return '例如：codex exec…'
-  return '例如：my-team-cli --flag…'
-})
+const commandPlaceholder = computed(() => commandHintFor(provider.value))
 
 function backToStep1() {
   err.value = ''
@@ -594,12 +569,11 @@ onUnmounted(() => {
               :key="p.value"
               type="button"
               class="protocol-card"
-              :class="{ disabled: !p.enabled }"
-              :title="p.enabled ? p.label : `${p.label}（即将支持）`"
-              @click="selectProtocol(p.value, p.enabled)"
+              :title="p.label"
+              @click="selectProtocol(p.value)"
             >
               <ProviderIcon :provider="p.value" :title="p.label" :size="28" />
-              <span>{{ p.label }}</span>
+              <span>{{ p.short }}</span>
             </button>
           </div>
           <p v-if="err" class="error">{{ err }}</p>

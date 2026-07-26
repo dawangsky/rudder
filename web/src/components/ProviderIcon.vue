@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Provider 图标：优先自定义图，否则内置品牌标（Claude / Cursor / Codex 用官方 SVG）。
+ * Provider 图标：优先自定义图，否则内置品牌标；其余用着色首字母。
  */
 import { computed } from 'vue'
 import claudeSvg from '@/assets/providers/claude.svg'
 import cursorSvg from '@/assets/providers/cursor.svg'
 import openaiSvg from '@/assets/providers/openai.svg'
+import { baseProviderOf } from '@/lib/runtimes'
 
 const props = withDefaults(
   defineProps<{
@@ -18,17 +19,26 @@ const props = withDefaults(
   { size: 22, customSrc: '' },
 )
 
+const base = computed(() => baseProviderOf(props.provider || '').toLowerCase())
+
 const kind = computed(() => {
   if (props.customSrc) return 'custom'
-  const p = (props.provider || '').toLowerCase()
+  const p = base.value
   if (p === 'claude_code' || p === 'claude') return 'claude'
   if (p === 'codex' || p === 'openai') return 'codex'
   if (p === 'cursor') return 'cursor'
   if (p === 'stub') return 'stub'
-  return 'fallback'
+  return p || 'fallback'
 })
 
-const letter = computed(() => (props.provider || '?').slice(0, 1).toUpperCase())
+const letter = computed(() => {
+  const p = base.value || '?'
+  if (p === 'claude_code') return 'C'
+  if (p === 'opencode') return 'O'
+  if (p === 'codebuddy') return 'B'
+  if (p === 'traecli') return 'T'
+  return p.slice(0, 1).toUpperCase()
+})
 
 const assetSrc = computed(() => {
   if (kind.value === 'claude') return claudeSvg
@@ -50,7 +60,6 @@ const assetSrc = computed(() => {
     <img v-if="kind === 'custom'" class="asset-img" :src="customSrc" alt="" />
     <img v-else-if="assetSrc" class="asset-img" :src="assetSrc" alt="" />
 
-    <!-- stub -->
     <svg v-else-if="kind === 'stub'" viewBox="0 0 24 24" aria-hidden="true">
       <rect width="24" height="24" rx="6" fill="#e5e7eb" />
       <path
@@ -59,7 +68,6 @@ const assetSrc = computed(() => {
       />
     </svg>
 
-    <!-- 未知：回退首字母 -->
     <span v-else class="fallback-letter">{{ letter }}</span>
   </span>
 </template>
@@ -94,6 +102,23 @@ const assetSrc = computed(() => {
 .provider-icon.custom {
   background: #f3f4f6;
 }
+.provider-icon.opencode { background: #ecfdf5; color: #047857; }
+.provider-icon.gemini { background: #eff6ff; color: #1d4ed8; }
+.provider-icon.copilot { background: #f5f3ff; color: #6d28d9; }
+.provider-icon.aider { background: #fef3c7; color: #b45309; }
+.provider-icon.goose { background: #fdf2f8; color: #be185d; }
+.provider-icon.codebuddy { background: #fff1f2; color: #e11d48; }
+.provider-icon.qwen { background: #fff7ed; color: #c2410c; }
+.provider-icon.kimi { background: #f0f9ff; color: #0369a1; }
+.provider-icon.qoder { background: #fdf4ff; color: #a21caf; }
+.provider-icon.traecli { background: #ecfeff; color: #0e7490; }
+.provider-icon.kiro { background: #fefce8; color: #a16207; }
+.provider-icon.grok { background: #f4f4f5; color: #18181b; }
+.provider-icon.hermes { background: #fef2f2; color: #b91c1c; }
+.provider-icon.pi { background: #eef2ff; color: #4338ca; }
+.provider-icon.openclaw { background: #f7fee7; color: #4d7c0f; }
+.provider-icon.antigravity { background: #faf5ff; color: #7e22ce; }
+.provider-icon.deveco { background: #ecfdf5; color: #0f766e; }
 .provider-icon svg {
   width: 100%;
   height: 100%;
@@ -108,7 +133,7 @@ const assetSrc = computed(() => {
 .fallback-letter {
   font-size: 11px;
   font-weight: 700;
-  color: #374151;
+  color: inherit;
   line-height: 1;
 }
 </style>

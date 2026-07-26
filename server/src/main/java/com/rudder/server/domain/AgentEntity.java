@@ -38,7 +38,7 @@ public class AgentEntity {
     @TableField("instructions")
     private String instructions;
 
-    /** Provider：cursor / claude_code / codex / stub */
+    /** Provider：cursor / claude_code / codex / opencode / qwen / … */
     @TableField("provider")
     private String provider;
 
