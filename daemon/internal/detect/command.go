@@ -6,7 +6,56 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+var pathOnce sync.Once
+
+// EnsureUserPath 把常见用户安装目录并入 PATH。
+// Desktop/Electron 启动的 Daemon 往往只有系统 PATH，找不到 ~/.npm-global/bin 等处的 CLI。
+func EnsureUserPath() {
+	pathOnce.Do(func() {
+		home, _ := os.UserHomeDir()
+		extras := []string{
+			filepath.Join(home, ".npm-global", "bin"),
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, "bin"),
+			filepath.Join(home, ".yarn", "bin"),
+			filepath.Join(home, "Library", "pnpm"),
+			filepath.Join(home, ".bun", "bin"),
+			"/opt/homebrew/bin",
+			"/usr/local/bin",
+		}
+		cur := os.Getenv("PATH")
+		parts := strings.Split(cur, string(os.PathListSeparator))
+		seen := map[string]bool{}
+		for _, p := range parts {
+			if p != "" {
+				seen[p] = true
+			}
+		}
+		var prepend []string
+		for _, d := range extras {
+			if d == "" || seen[d] {
+				continue
+			}
+			if st, err := os.Stat(d); err == nil && st.IsDir() {
+				prepend = append(prepend, d)
+				seen[d] = true
+			}
+		}
+		if len(prepend) == 0 {
+			return
+		}
+		os.Setenv("PATH", strings.Join(append(prepend, cur), string(os.PathListSeparator)))
+	})
+}
+
+// LookPath 在补全用户 PATH 后查找可执行文件。
+func LookPath(bin string) (string, error) {
+	EnsureUserPath()
+	return exec.LookPath(bin)
+}
 
 // SplitCommand 简单按空白拆分命令（支持双引号片段）。
 func SplitCommand(cmdline string) ([]string, error) {
@@ -65,7 +114,7 @@ func ValidateCommand(cmdline string) error {
 		}
 		return nil
 	}
-	if _, err := exec.LookPath(bin); err != nil {
+	if _, err := LookPath(bin); err != nil {
 		return fmt.Errorf("本机 PATH 中找不到命令「%s」，请确认已安装或使用绝对路径", bin)
 	}
 	return nil

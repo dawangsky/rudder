@@ -105,7 +105,7 @@ func Run(provider, workDir, prompt, instructions, model, thinkingMode string) Re
 	}
 	if spec, ok := runSpecs[base]; ok {
 		for _, b := range spec.bins {
-			if bin, err := exec.LookPath(b); err == nil {
+			if bin, err := detect.LookPath(b); err == nil {
 				return runCmd(bin, workDir, spec.args(prompt), env)
 			}
 		}
@@ -113,7 +113,7 @@ func Run(provider, workDir, prompt, instructions, model, thinkingMode string) Re
 	// 未知协议：尝试用 Catalog 中的 bin + 直接传 prompt
 	if bins, ok := detect.ProviderBins[base]; ok {
 		for _, b := range bins {
-			if bin, err := exec.LookPath(b); err == nil {
+			if bin, err := detect.LookPath(b); err == nil {
 				return runCmd(bin, workDir, []string{prompt}, env)
 			}
 		}

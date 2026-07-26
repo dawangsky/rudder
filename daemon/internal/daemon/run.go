@@ -18,6 +18,7 @@ import (
 
 // Run 常驻循环：内置自动探测 + 自定义命令运行时心跳领任务。
 func Run(serverOverride string) error {
+	detect.EnsureUserPath()
 	creds, err := config.LoadCredentials()
 	if err != nil {
 		return fmt.Errorf("请先 rudder login: %w", err)

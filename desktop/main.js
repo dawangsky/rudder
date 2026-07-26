@@ -25,6 +25,33 @@ function profileHome() {
   return path.join(os.homedir(), '.rudder', 'profiles', DESKTOP_PROFILE)
 }
 
+/** Desktop 子进程 PATH：补上 npm 全局等常见目录，否则探测不到 opencode 等 CLI。 */
+function cliEnv() {
+  const home = os.homedir()
+  const extras = [
+    path.join(home, '.npm-global', 'bin'),
+    path.join(home, '.local', 'bin'),
+    path.join(home, 'bin'),
+    path.join(home, '.yarn', 'bin'),
+    path.join(home, 'Library', 'pnpm'),
+    path.join(home, '.bun', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ]
+  const cur = process.env.PATH || ''
+  const parts = cur.split(path.delimiter).filter(Boolean)
+  const seen = new Set(parts)
+  const prepend = extras.filter((d) => {
+    if (seen.has(d)) return false
+    try {
+      return fs.statSync(d).isDirectory()
+    } catch {
+      return false
+    }
+  })
+  return { ...process.env, PATH: [...prepend, ...parts].join(path.delimiter) }
+}
+
 function credentialsPath() {
   return path.join(profileHome(), 'credentials.json')
 }
@@ -118,7 +145,10 @@ function createWindow() {
 
 function runCli(args) {
   return new Promise((resolve) => {
-    const child = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, ...args], { shell: false })
+    const child = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, ...args], {
+      shell: false,
+      env: cliEnv(),
+    })
     let out = ''
     let err = ''
     child.stdout.on('data', (d) => { out += d.toString() })
@@ -147,6 +177,7 @@ async function startDaemonProcess() {
   daemonChild = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, 'daemon', 'start'], {
     detached: true,
     stdio: 'ignore',
+    env: cliEnv(),
   })
   daemonChild.unref()
   daemonStartedAt = Date.now()

@@ -2,7 +2,6 @@ package detect
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -182,6 +181,7 @@ func BaseProvider(provider string) string {
 
 // IsInstalled 探测本机是否已安装该 Provider（stub 恒为 true）。
 func IsInstalled(provider string) bool {
+	EnsureUserPath()
 	if provider == "stub" {
 		return true
 	}
@@ -192,7 +192,7 @@ func IsInstalled(provider string) bool {
 		return false
 	}
 	for _, b := range bins {
-		if _, err := exec.LookPath(b); err == nil {
+		if _, err := LookPath(b); err == nil {
 			return true
 		}
 	}
