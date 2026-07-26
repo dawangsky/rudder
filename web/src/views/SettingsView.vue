@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getServerBaseUrl, setServerBaseUrl } from '@/lib/config'
 import { getHostBridge, type DaemonStatus } from '@/lib/hostBridge'
 import { getSessionEmail } from '@/lib/session'
+import AlertDialog from '@/components/AlertDialog.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import {
   createProtocol,
@@ -57,6 +58,8 @@ const saved = ref(false)
 const protoErr = ref('')
 const protoBusy = ref(false)
 const showAdd = ref(false)
+const alertOpen = ref(false)
+const alertMessage = ref('')
 const editing = ref<ProtocolRecord | null>(null)
 const form = ref({
   code: '',
@@ -114,6 +117,11 @@ async function refreshProtocols() {
   }
 }
 
+function showAlert(msg: string) {
+  alertMessage.value = msg
+  alertOpen.value = true
+}
+
 async function toggleEnabled(p: ProtocolRecord, enabled: boolean) {
   protoErr.value = ''
   protoBusy.value = true
@@ -124,7 +132,7 @@ async function toggleEnabled(p: ProtocolRecord, enabled: boolean) {
     protoErr.value = msg
     // 停用被拒时显式提示，并刷新以还原开关状态
     if (!enabled) {
-      window.alert(msg)
+      showAlert(msg)
     }
     await refreshProtocols()
   } finally {
@@ -209,7 +217,7 @@ async function removeProtocol(p: ProtocolRecord) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : '删除失败'
     protoErr.value = msg
-    window.alert(msg)
+    showAlert(msg)
   } finally {
     protoBusy.value = false
   }
@@ -499,6 +507,12 @@ onUnmounted(() => {
         </header>
       </div>
     </main>
+
+    <AlertDialog
+      :open="alertOpen"
+      :message="alertMessage"
+      @close="alertOpen = false"
+    />
   </section>
 </template>
 
