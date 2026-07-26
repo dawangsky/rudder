@@ -59,6 +59,7 @@ const protoErr = ref('')
 const protoBusy = ref(false)
 const showAdd = ref(false)
 const alertOpen = ref(false)
+const alertTitle = ref('无法完成操作')
 const alertMessage = ref('')
 const editing = ref<ProtocolRecord | null>(null)
 const form = ref({
@@ -117,12 +118,16 @@ async function refreshProtocols() {
   }
 }
 
-function showAlert(msg: string) {
+function showAlert(msg: string, title = '无法完成操作') {
+  alertTitle.value = title
   alertMessage.value = msg
   alertOpen.value = true
 }
 
 async function toggleEnabled(p: ProtocolRecord, enabled: boolean) {
+  if (protoBusy.value) return
+  const prev = p.enabled !== false
+  if (prev === enabled) return
   protoErr.value = ''
   protoBusy.value = true
   try {
@@ -130,9 +135,8 @@ async function toggleEnabled(p: ProtocolRecord, enabled: boolean) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : '更新失败'
     protoErr.value = msg
-    // 停用被拒时显式提示，并刷新以还原开关状态
     if (!enabled) {
-      showAlert(msg)
+      showAlert(msg, '无法停用协议')
     }
     await refreshProtocols()
   } finally {
@@ -217,7 +221,7 @@ async function removeProtocol(p: ProtocolRecord) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : '删除失败'
     protoErr.value = msg
-    showAlert(msg)
+    showAlert(msg, '无法删除协议')
   } finally {
     protoBusy.value = false
   }
@@ -444,7 +448,7 @@ onUnmounted(() => {
                   type="checkbox"
                   :checked="p.enabled !== false"
                   :disabled="protoBusy"
-                  @change="toggleEnabled(p, ($event.target as HTMLInputElement).checked)"
+                  @click.prevent="toggleEnabled(p, !(p.enabled !== false))"
                 />
                 <span class="slider" />
               </label>
@@ -510,7 +514,9 @@ onUnmounted(() => {
 
     <AlertDialog
       :open="alertOpen"
+      :title="alertTitle"
       :message="alertMessage"
+      ok-label="知道了"
       @close="alertOpen = false"
     />
   </section>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /**
- * 应用内提示弹窗（替代 window.alert）。
- * 视觉对齐系统提示：白底圆角 + 全宽蓝色胶囊 OK。
+ * 应用内提示弹窗（替代 window.alert），风格与 ConfirmDialog 一致。
  */
 import { nextTick, onUnmounted, useTemplateRef, watch } from 'vue'
 
@@ -17,8 +16,8 @@ const props = withDefaults(
     okLabel?: string
   }>(),
   {
-    title: '',
-    okLabel: 'OK',
+    title: '无法完成操作',
+    okLabel: '知道了',
   },
 )
 
@@ -54,80 +53,77 @@ onUnmounted(() => {
   <Teleport to="body">
     <div
       v-if="open"
-      class="alert-backdrop"
+      class="modal-backdrop"
       role="presentation"
       @click.self="emit('close')"
     >
       <div
-        class="alert-modal"
+        class="modal"
         role="alertdialog"
         aria-modal="true"
-        :aria-label="title || '提示'"
+        :aria-labelledby="title ? 'alert-dialog-title' : undefined"
+        :aria-describedby="'alert-dialog-desc'"
       >
-        <h3 v-if="title" class="alert-title">{{ title }}</h3>
-        <p class="alert-message">{{ message }}</p>
-        <button ref="okBtn" type="button" class="alert-ok" @click="emit('close')">
-          {{ okLabel }}
-        </button>
+        <h3 v-if="title" id="alert-dialog-title">{{ title }}</h3>
+        <p id="alert-dialog-desc">{{ message }}</p>
+        <div class="modal-actions">
+          <button ref="okBtn" type="button" class="btn-confirm" @click="emit('close')">
+            {{ okLabel }}
+          </button>
+        </div>
       </div>
     </div>
   </Teleport>
 </template>
 
 <style scoped>
-.alert-backdrop {
+.modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1100;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.28);
 }
-.alert-modal {
-  width: min(320px, 100%);
+.modal {
+  width: min(420px, 100%);
   background: #fff;
-  border-radius: 14px;
-  padding: 20px 16px 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
-  text-align: center;
-  outline: none;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
 }
-.alert-title {
+.modal h3 {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 650;
-  color: #111827;
+  color: var(--text, #111827);
 }
-.alert-message {
+.modal > p {
   margin: 0 0 16px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #1f2937;
-  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #374151;
+  white-space: pre-line;
   word-break: break-word;
 }
-/* 与系统 alert 一致：全宽蓝色胶囊 OK，勿改形状/配色 */
-.alert-ok {
-  display: block;
-  width: 100%;
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.btn-confirm {
   border: none;
-  border-radius: 999px;
-  padding: 10px 16px;
-  font-size: 15px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.01em;
-  color: #fff;
-  background: #007aff;
   cursor: pointer;
-  -webkit-appearance: none;
-  appearance: none;
+  background: #111827;
+  color: #fff;
 }
-.alert-ok:hover {
-  background: #0066d6;
-}
-.alert-ok:active {
-  background: #005bbf;
+.btn-confirm:hover {
+  background: #1f2937;
 }
 </style>
