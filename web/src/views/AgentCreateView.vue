@@ -94,7 +94,7 @@ async function create() {
     // 若选了具体 runtime（含自定义），以该 runtime 的 provider 为准
     const rt = runtimeOptions.value.find((r) => r.id === form.value.runtimeId)
     const provider = rt?.provider || form.value.provider
-    await apiFetch('/api/agents', {
+    const created = await apiFetch<{ id: string }>('/api/agents', {
       method: 'POST',
       body: JSON.stringify({
         name: form.value.name.trim(),
@@ -105,7 +105,7 @@ async function create() {
         skillIds: form.value.skillIds,
       }),
     })
-    await router.replace({ name: 'agents' })
+    await router.replace({ name: 'agent-detail', params: { agentId: created.id } })
   } catch (e) {
     err.value = e instanceof Error ? e.message : '创建失败'
   } finally {

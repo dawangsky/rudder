@@ -103,6 +103,10 @@ function goCreate() {
   router.push({ name: 'agent-create' })
 }
 
+function openAgent(a: Agent) {
+  router.push({ name: 'agent-detail', params: { agentId: a.id } })
+}
+
 onMounted(load)
 </script>
 
@@ -171,8 +175,15 @@ onMounted(load)
               {{ filter === 'archived' ? '暂无已归档智能体' : '暂无智能体，点击「新建智能体」开始' }}
             </td>
           </tr>
-          <tr v-for="a in filtered" :key="a.id">
-            <td class="col-check"><input type="checkbox" disabled title="批量操作二期" /></td>
+          <tr
+            v-for="a in filtered"
+            :key="a.id"
+            class="row-click"
+            @click="openAgent(a)"
+          >
+            <td class="col-check" @click.stop>
+              <input type="checkbox" disabled title="批量操作二期" />
+            </td>
             <td>
               <div class="agent-cell">
                 <span class="agent-av" aria-hidden="true">
@@ -307,6 +318,8 @@ th {
   white-space: nowrap;
 }
 tr:last-child td { border-bottom: none; }
+.row-click { cursor: pointer; }
+.row-click:hover td { background: #f9fafb; }
 .col-check { width: 36px; }
 .num { text-align: right; }
 .empty { text-align: center; color: var(--muted); padding: 36px !important; }

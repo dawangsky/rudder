@@ -55,3 +55,15 @@ export function agentStatusLabel(status?: string, runtimeOnline?: boolean) {
   if (runtimeOnline === true || status === 'idle' || status === 'online') return '在线'
   return status || '未知'
 }
+
+/** 详情页状态文案：在线 · 空闲 / 在线 · 忙碌 / 离线 / 已归档 */
+export function agentDetailStatus(status?: string, runtimeOnline?: boolean) {
+  if ((status || '').toLowerCase() === 'archived') return '已归档'
+  if (runtimeOnline === false) return '离线'
+  if (status === 'busy' || status === 'running') return '在线 · 忙碌'
+  if (runtimeOnline === true || status === 'idle' || status === 'online') return '在线 · 空闲'
+  return status || '未知'
+}
+
+export type AgentDetailTab = 'overview' | 'work' | 'skills' | 'settings'
+export type AgentSettingsSection = 'general' | 'access' | 'env' | 'params'

@@ -112,6 +112,13 @@ public class ResourceService {
             a.setProvider(provider.toLowerCase());
         }
         if (body.containsKey("runtimeId")) a.setRuntimeId(asLong(body.get("runtimeId")));
+        if (body.containsKey("maxConcurrency")) {
+            int n = body.get("maxConcurrency") == null ? 1 : ((Number) body.get("maxConcurrency")).intValue();
+            if (n < 1 || n > 50) {
+                throw new IllegalArgumentException("并发须在 1–50 之间");
+            }
+            a.setMaxConcurrency(n);
+        }
         if (body.containsKey("status")) {
             String status = str(body.get("status")).toLowerCase();
             if (!StringUtils.hasText(status)) {

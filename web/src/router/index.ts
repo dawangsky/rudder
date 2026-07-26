@@ -5,6 +5,7 @@ import ChatView from '../views/ChatView.vue'
 import IssuesView from '../views/IssuesView.vue'
 import AgentsView from '../views/AgentsView.vue'
 import AgentCreateView from '../views/AgentCreateView.vue'
+import AgentDetailView from '../views/AgentDetailView.vue'
 import SkillsView from '../views/SkillsView.vue'
 import RuntimesView from '../views/RuntimesView.vue'
 import RuntimeMachineView from '../views/RuntimeMachineView.vue'
@@ -32,6 +33,7 @@ export const router = createRouter({
         { path: 'agents', name: 'agents', component: AgentsView },
         { path: 'agents/new', name: 'agent-create', component: AgentCreateView },
         { path: 'agents/new/blank', name: 'agent-create-blank', component: AgentCreateView },
+        { path: 'agents/:agentId', name: 'agent-detail', component: AgentDetailView },
         { path: 'skills', name: 'skills', component: SkillsView },
         { path: 'runtimes', name: 'runtimes', component: RuntimesView },
         { path: 'runtimes/machines/:daemonId', name: 'runtime-machine', component: RuntimeMachineView },
