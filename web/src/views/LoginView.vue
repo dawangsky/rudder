@@ -24,6 +24,8 @@ const mode = ref<'login' | 'register'>('login')
 const email = ref('')
 const password = ref('')
 const displayName = ref('')
+/** 勾选则保存密码；不勾选只保留账号邮箱 */
+const remember = ref(false)
 const error = ref('')
 const loading = ref(false)
 const accounts = ref<RememberedAccount[]>([])
@@ -38,15 +40,16 @@ function refreshAccounts() {
 
 function pickAccount(a: RememberedAccount) {
   email.value = a.email
-  password.value = a.password
+  password.value = a.rememberPassword ? a.password : ''
+  remember.value = a.rememberPassword
   accountMenuOpen.value = false
 }
 
 function onEmailInput() {
-  // 邮箱变更时若匹配已存账号则自动填密码，否则清空密码避免串号
   const hit = findRememberedAccount(email.value)
   if (hit) {
-    password.value = hit.password
+    password.value = hit.rememberPassword ? hit.password : ''
+    remember.value = hit.rememberPassword
   }
 }
 
@@ -61,17 +64,19 @@ function onDocClick(ev: MouseEvent) {
 onMounted(() => {
   refreshAccounts()
   document.addEventListener('click', onDocClick)
-  // 切换账号：不回填当前账号，但保留下拉可选历史
+  // 切换账号：不回填，可从下拉选历史
   if (route.query.switch === '1') {
     email.value = ''
     password.value = ''
+    remember.value = false
     return
   }
-  // 退出登录：回填最近一条，方便一键登录
+  // 退出登录：回填最近一条
   const recent = accounts.value[0]
   if (recent) {
     email.value = recent.email
-    password.value = recent.password
+    password.value = recent.rememberPassword ? recent.password : ''
+    remember.value = recent.rememberPassword
   }
 })
 
@@ -99,8 +104,8 @@ async function onSubmit() {
       method: 'POST',
       body: JSON.stringify(body),
     })
-    // 默认记录账号（最多 6 条，FIFO）
-    rememberAccount(email.value.trim(), password.value)
+    // 始终占一条名额；是否存密码看勾选。超出 6 条 FIFO 顶掉最旧（含曾记住密码的）
+    rememberAccount(email.value.trim(), password.value, remember.value)
     refreshAccounts()
     sessionStorage.setItem('rudder_session_token', data.sessionToken)
     sessionStorage.setItem('rudder_user_email', data.user.email)
@@ -160,10 +165,15 @@ async function onSubmit() {
             @click="pickAccount(a)"
           >
             <span class="av">{{ (a.email[0] || '?').toUpperCase() }}</span>
-            <span class="em">{{ a.email }}</span>
+            <span class="meta">
+              <span class="em">{{ a.email }}</span>
+              <span class="badge" :class="{ on: a.rememberPassword }">
+                {{ a.rememberPassword ? '已记密码' : '仅账号' }}
+              </span>
+            </span>
           </button>
         </div>
-        <p v-if="hasAccounts" class="tip">已保存 {{ accounts.length }} / 6 个账号，可下拉切换</p>
+        <p v-if="hasAccounts" class="tip">已保存 {{ accounts.length }} / 6 个账号</p>
       </div>
 
       <label>
@@ -173,6 +183,10 @@ async function onSubmit() {
       <label v-if="mode === 'register'">
         显示名（可选）
         <input v-model="displayName" type="text" autocomplete="nickname" />
+      </label>
+      <label class="remember">
+        <input v-model="remember" type="checkbox" />
+        记住密码
       </label>
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" class="primary" :disabled="loading">
@@ -283,14 +297,40 @@ async function onSubmit() {
   justify-content: center;
   flex-shrink: 0;
 }
+.meta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .em {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.badge {
+  font-size: 11px;
+  color: var(--muted, #9ca3af);
+}
+.badge.on {
+  color: #059669;
+}
 .tip {
   margin: 0;
   font-size: 12px;
   color: var(--muted, #9ca3af);
+}
+.remember {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted, #666);
+}
+.remember input {
+  width: auto;
+  margin: 0;
 }
 </style>
