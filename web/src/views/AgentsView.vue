@@ -14,6 +14,7 @@ import {
   type AgentFilter,
 } from '@/lib/agents'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import MoreMenu from '@/components/MoreMenu.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon } from '@/lib/providerIcons'
 import { displayName, providerLabel, type Runtime } from '@/lib/runtimes'
@@ -31,6 +32,7 @@ const busy = ref(false)
 type PendingAction = { type: 'archive' | 'delete'; agent: Agent } | null
 const pending = ref<PendingAction>(null)
 const ackDelete = ref(false)
+const menuOpenId = ref('')
 
 const email = computed(() => getSessionEmail())
 const ownerName = computed(() => ownerDisplayName(email.value))
@@ -127,12 +129,18 @@ async function restoreAgent(a: Agent) {
   }
 }
 
+function setMenuOpen(id: string, open: boolean) {
+  menuOpenId.value = open ? id : menuOpenId.value === id ? '' : menuOpenId.value
+}
+
 function askArchive(a: Agent) {
+  menuOpenId.value = ''
   ackDelete.value = false
   pending.value = { type: 'archive', agent: a }
 }
 
 function askDelete(a: Agent) {
+  menuOpenId.value = ''
   ackDelete.value = false
   pending.value = { type: 'delete', agent: a }
 }
@@ -221,7 +229,7 @@ onMounted(load)
             <th>运行时</th>
             <th>最近活跃</th>
             <th class="num">运行次数</th>
-            <th class="col-actions">操作</th>
+            <th class="col-actions"></th>
           </tr>
         </thead>
         <tbody>
@@ -278,14 +286,31 @@ onMounted(load)
             <td class="muted">{{ formatRelative(a.updatedAt || a.createdAt) }}</td>
             <td class="num muted">—</td>
             <td class="col-actions" @click.stop>
-              <template v-if="isArchived(a)">
-                <button type="button" class="link-btn" :disabled="busy" @click="restoreAgent(a)">恢复</button>
-                <button type="button" class="link-btn danger" :disabled="busy" @click="askDelete(a)">删除</button>
-              </template>
-              <template v-else>
-                <button type="button" class="link-btn" :disabled="busy" @click="askArchive(a)">归档</button>
-                <button type="button" class="link-btn danger" :disabled="busy" @click="askDelete(a)">删除</button>
-              </template>
+              <MoreMenu
+                :open="menuOpenId === a.id"
+                @update:open="(v) => setMenuOpen(a.id, v)"
+              >
+                <template #default="{ close }">
+                  <button
+                    v-if="isArchived(a)"
+                    type="button"
+                    :disabled="busy"
+                    @click="close(); restoreAgent(a)"
+                  >恢复</button>
+                  <button
+                    v-else
+                    type="button"
+                    :disabled="busy"
+                    @click="close(); askArchive(a)"
+                  >归档</button>
+                  <button
+                    type="button"
+                    class="danger"
+                    :disabled="busy"
+                    @click="close(); askDelete(a)"
+                  >删除</button>
+                </template>
+              </MoreMenu>
             </td>
           </tr>
         </tbody>
@@ -476,19 +501,9 @@ tr:last-child td { border-bottom: none; }
 .status.archived { color: #92400e; }
 .status.archived .dot { background: #f59e0b; }
 .col-actions {
-  white-space: nowrap;
+  width: 48px;
   text-align: right;
 }
-.link-btn {
-  border: none;
-  background: transparent;
-  color: #2563eb;
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 6px;
-}
-.link-btn:hover { text-decoration: underline; }
-.link-btn.danger { color: #b42318; }
 .owner {
   display: inline-flex;
   align-items: center;

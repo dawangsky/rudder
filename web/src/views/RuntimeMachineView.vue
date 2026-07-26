@@ -7,6 +7,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import { getHostBridge } from '@/lib/hostBridge'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import MoreMenu from '@/components/MoreMenu.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import {
@@ -16,6 +18,7 @@ import {
   iconProvider,
   isCustomRuntime,
   providerLabel,
+  runtimeTitle,
   type LocalMachineHint,
   type Runtime,
 } from '@/lib/runtimes'
@@ -24,6 +27,7 @@ const route = useRoute()
 const router = useRouter()
 
 const runtimes = ref<Runtime[]>([])
+const agents = ref<{ id: string; name: string; runtimeId?: string | null; status?: string }[]>([])
 const localDaemonId = ref('')
 const localHostName = ref('')
 const localProfile = ref('')
@@ -44,6 +48,10 @@ const adding = ref(false)
 const validating = ref(false)
 const daemonRunning = ref(false)
 const iconTick = ref(0)
+const menuOpenId = ref('')
+const pendingDelete = ref<Runtime | null>(null)
+const ackDelete = ref(false)
+const removing = ref(false)
 let timer: number | undefined
 
 /** 第 1 步：选择基础协议（内置仍自动探测；此处用于自定义启动命令） */
@@ -118,7 +126,82 @@ function loadAlias() {
 }
 
 async function load() {
-  runtimes.value = await apiFetch('/api/runtimes')
+  const [rts, ags] = await Promise.all([
+    apiFetch<Runtime[]>('/api/runtimes'),
+    apiFetch<{ id: string; name: string; runtimeId?: string | null; status?: string }[]>('/api/agents').catch(
+      () => [] as { id: string; name: string; runtimeId?: string | null; status?: string }[],
+    ),
+  ])
+  runtimes.value = rts
+  agents.value = ags
+}
+
+function agentCountFor(r: Runtime) {
+  return agents.value.filter(
+    (a) => a.runtimeId === r.id && (a.status || '').toLowerCase() !== 'archived',
+  ).length
+}
+
+const pendingDeleteAgentCount = computed(() =>
+  pendingDelete.value ? agentCountFor(pendingDelete.value) : 0,
+)
+
+function goRuntime(id: string) {
+  router.push({ name: 'runtime-detail', params: { runtimeId: id } })
+}
+
+function askDeleteRuntime(r: Runtime) {
+  menuOpenId.value = ''
+  ackDelete.value = false
+  pendingDelete.value = r
+  err.value = ''
+}
+
+function setMenuOpen(id: string, open: boolean) {
+  menuOpenId.value = open ? id : menuOpenId.value === id ? '' : menuOpenId.value
+}
+
+function closeDeleteRuntime() {
+  if (removing.value) return
+  pendingDelete.value = null
+  ackDelete.value = false
+}
+
+async function confirmDeleteRuntime() {
+  const r = pendingDelete.value
+  if (!r) return
+  if (pendingDeleteAgentCount.value > 0 && !ackDelete.value) return
+  removing.value = true
+  err.value = ''
+  try {
+    const host = getHostBridge()
+    if (isLocal.value) {
+      const removed = await host.removeRuntime(r.provider)
+      if (!removed.ok) {
+        err.value = removed.message || '本机移除失败，删除已中止'
+        return
+      }
+    } else {
+      const q = new URLSearchParams()
+      if (r.daemonId) q.set('daemonId', r.daemonId)
+      try {
+        await apiFetch(
+          `/api/runtimes/provider/${encodeURIComponent(r.provider)}${q.toString() ? `?${q}` : ''}`,
+          { method: 'DELETE' },
+        )
+      } catch {
+        await apiFetch(`/api/runtimes/${r.id}`, { method: 'DELETE' })
+      }
+    }
+    pendingDelete.value = null
+    ackDelete.value = false
+    okMsg.value = `已删除 ${displayName(r)}`
+    await load()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '删除失败'
+  } finally {
+    removing.value = false
+  }
 }
 
 async function refreshLocal() {
@@ -135,10 +218,6 @@ async function refreshLocal() {
     localProfile.value = ''
     daemonRunning.value = false
   }
-}
-
-function goRuntime(id: string) {
-  router.push({ name: 'runtime-detail', params: { runtimeId: id } })
 }
 
 function openRename() {
@@ -412,11 +491,12 @@ onUnmounted(() => {
             <th>智能体</th>
             <th>最近心跳</th>
             <th>CLI</th>
+            <th class="col-actions"></th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="!machine.runtimes.length">
-            <td colspan="5" class="empty">暂无运行时，可点击「添加自定义运行时」</td>
+            <td colspan="6" class="empty">暂无运行时，可点击「添加自定义运行时」</td>
           </tr>
           <tr
             v-for="r in machine.runtimes"
@@ -441,9 +521,25 @@ onUnmounted(() => {
             <td>
               <span class="health" :class="r.status">{{ r.status === 'online' ? '在线' : '离线' }}</span>
             </td>
-            <td class="muted">—</td>
+            <td class="muted">{{ agentCountFor(r) || '—' }}</td>
             <td class="muted">{{ formatHeartbeat(r.lastHeartbeatAt) }}</td>
             <td class="muted">{{ providerLabel(r) }}</td>
+            <td class="col-actions" @click.stop>
+              <MoreMenu
+                :open="menuOpenId === r.id"
+                @update:open="(v) => setMenuOpen(r.id, v)"
+              >
+                <template #default="{ close }">
+                  <button type="button" @click="close(); goRuntime(r.id)">查看详情</button>
+                  <button
+                    type="button"
+                    class="danger"
+                    :disabled="removing"
+                    @click="close(); askDeleteRuntime(r)"
+                  >删除</button>
+                </template>
+              </MoreMenu>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -583,6 +679,44 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      v-if="pendingDelete && pendingDeleteAgentCount > 0"
+      :open="true"
+      :title="`归档 ${pendingDeleteAgentCount} 个智能体并删除该运行时？`"
+      :description="`删除「${runtimeTitle(pendingDelete)}」。下列智能体将被归档，其排队中或运行中的 task 会被取消，随后运行时本身会被删除。`"
+      :callout="isLocal && daemonRunning
+        ? '该运行时由正在运行的本地守护进程托管。删除会成功，但守护进程可能在数秒内重新注册——若想彻底移除，请先停止守护进程。'
+        : ''"
+      callout-tone="warn"
+      confirm-label="归档并删除运行时"
+      tone="danger"
+      :busy="removing"
+      require-ack
+      v-model:ack="ackDelete"
+      :ack-label="`我已了解：这 ${pendingDeleteAgentCount} 个智能体将被归档，其排队中或运行中的 task 会被取消。`"
+      @cancel="closeDeleteRuntime"
+      @confirm="confirmDeleteRuntime"
+    >
+      <p v-if="err" class="error">{{ err }}</p>
+    </ConfirmDialog>
+    <ConfirmDialog
+      v-else-if="pendingDelete"
+      :open="true"
+      :title="`删除运行时「${runtimeTitle(pendingDelete)}」？`"
+      description="确定要删除该运行时吗？"
+      :callout="isLocal && daemonRunning
+        ? '内置运行时若本机仍安装对应 CLI，Daemon 轮询探测后可能再次出现。彻底消失请卸载 CLI 或先停止守护进程。'
+        : ''"
+      callout-tone="warn"
+      confirm-label="删除运行时"
+      tone="danger"
+      :busy="removing"
+      @cancel="closeDeleteRuntime"
+      @confirm="confirmDeleteRuntime"
+    >
+      <p v-if="err" class="error">{{ err }}</p>
+    </ConfirmDialog>
   </section>
 
   <section v-else class="page">
@@ -717,6 +851,10 @@ th { font-size: 12px; color: var(--muted); font-weight: 600; }
 tr:last-child td { border-bottom: none; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover { background: #fafafa; }
+.col-actions {
+  width: 48px;
+  text-align: right;
+}
 .rt-cell {
   display: inline-flex;
   align-items: center;
