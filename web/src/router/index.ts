@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import ShellLayout from '../layouts/ShellLayout.vue'
 import LoginView from '../views/LoginView.vue'
+import OnboardingView from '../views/OnboardingView.vue'
 import ChatView from '../views/ChatView.vue'
 import IssuesView from '../views/IssuesView.vue'
 import AgentsView from '../views/AgentsView.vue'
@@ -13,18 +14,25 @@ import RuntimeDetailView from '../views/RuntimeDetailView.vue'
 import InboxView from '../views/InboxView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
+import { getSessionToken, hasWorkspace } from '../lib/session'
 
 /**
- * 路由：登录后默认进入 Chat（产品约定）。
- * MVP 暂用简单 sessionStorage 标记，后续对接真实 Token。
+ * 路由：登录后默认 Chat；无工作区必须先完成引导。
  */
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     {
+      path: '/onboarding',
+      name: 'onboarding',
+      component: OnboardingView,
+      meta: { onboarding: true },
+    },
+    {
       path: '/',
       component: ShellLayout,
+      meta: { requiresWorkspace: true },
       children: [
         { path: '', redirect: '/chat' },
         { path: 'chat', name: 'chat', component: ChatView },
@@ -48,7 +56,17 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.public) return true
-  const token = sessionStorage.getItem('rudder_session_token')
-  if (!token) return { name: 'login', query: { redirect: to.fullPath } }
+  const token = getSessionToken()
+  if (!token) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  const onboard = !!to.meta.onboarding
+  const ws = hasWorkspace()
+  if (!ws && !onboard) {
+    return { name: 'onboarding' }
+  }
+  if (ws && onboard) {
+    return { name: 'chat' }
+  }
   return true
 })

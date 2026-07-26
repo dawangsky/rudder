@@ -37,10 +37,18 @@ public class AuthInterceptor implements HandlerInterceptor {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             return false;
         }
-        // /api/auth/me 仅允许 session
+        // /api/auth/me、创建工作区：允许尚无工作区的会话
         String path = request.getRequestURI();
         if (path.startsWith("/api/auth/me") && !TokenTypes.SESSION.equals(principal.tokenType())) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            return false;
+        }
+        boolean workspaceExempt =
+                path.startsWith("/api/auth/me")
+                        || path.equals("/api/auth/workspaces")
+                        || path.equals("/api/auth/workspaces/");
+        if (!workspaceExempt && principal.workspaceId() == null && path.startsWith("/api/")) {
+            response.setStatus(HttpStatus.FORBIDDEN.value());
             return false;
         }
         AuthContext.set(principal);

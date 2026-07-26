@@ -51,4 +51,19 @@ public class AuthController {
         }
         return authService.me(principal);
     }
+
+    /** 引导页：创建工作区（无工作区时也可调用）。 */
+    @PostMapping("/workspaces")
+    public Map<String, Object> createWorkspace(@RequestBody Map<String, Object> body) {
+        AuthPrincipal principal = AuthContext.get();
+        if (principal == null || !TokenTypes.SESSION.equals(principal.tokenType())) {
+            throw new IllegalArgumentException("需要会话登录");
+        }
+        return authService.createWorkspace(
+                principal,
+                body.get("name") == null ? "" : String.valueOf(body.get("name")),
+                body.get("slug") == null ? null : String.valueOf(body.get("slug")),
+                body.get("issuePrefix") == null ? null : String.valueOf(body.get("issuePrefix"))
+        );
+    }
 }

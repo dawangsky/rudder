@@ -8,6 +8,7 @@ import {
   rememberAccount,
   type RememberedAccount,
 } from '@/lib/rememberAuth'
+import { applyAuthSession } from '@/lib/session'
 import { syncDaemonWithDesktopLogin } from '@/lib/syncDaemonLogin'
 
 /** 登录 / 注册页：对接 /api/auth/login 与 /api/auth/register。 */
@@ -15,7 +16,8 @@ import { syncDaemonWithDesktopLogin } from '@/lib/syncDaemonLogin'
 type AuthResponse = {
   sessionToken: string
   user: { id: string; email: string; displayName: string }
-  workspace: { id: string; name: string; slug: string }
+  workspace: { id: string; name: string; slug: string } | null
+  needsOnboarding?: boolean
 }
 
 const router = useRouter()
@@ -104,12 +106,14 @@ async function onSubmit() {
       method: 'POST',
       body: JSON.stringify(body),
     })
-    // 始终占一条名额；是否存密码看勾选。超出 6 条 FIFO 顶掉最旧（含曾记住密码的）
     rememberAccount(email.value.trim(), password.value, remember.value)
     refreshAccounts()
-    sessionStorage.setItem('rudder_session_token', data.sessionToken)
-    sessionStorage.setItem('rudder_user_email', data.user.email)
-    sessionStorage.setItem('rudder_workspace_id', data.workspace.id)
+    applyAuthSession(data)
+    const needOnboard = data.needsOnboarding || !data.workspace?.id
+    if (needOnboard) {
+      await router.replace({ name: 'onboarding' })
+      return
+    }
     try {
       await syncDaemonWithDesktopLogin(email.value.trim(), password.value)
     } catch (e) {
