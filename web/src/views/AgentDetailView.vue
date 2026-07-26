@@ -199,6 +199,39 @@ async function load() {
   }
 }
 
+async function saveProfile() {
+  if (!agent.value) return
+  err.value = ''
+  okMsg.value = ''
+  const name = form.value.name.trim()
+  if (!name) {
+    err.value = '名称不能为空'
+    return
+  }
+  if (name.length > 64) {
+    err.value = '名称最多 64 个字符'
+    return
+  }
+  saving.value = true
+  try {
+    const updated = await apiFetch<Agent>(`/api/agents/${agent.value.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name,
+        description: form.value.description.trim().slice(0, 255),
+        avatar: form.value.avatar || '',
+      }),
+    })
+    agent.value = updated
+    syncForm(updated)
+    okMsg.value = '资料已保存'
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '保存失败'
+  } finally {
+    saving.value = false
+  }
+}
+
 async function saveGeneral() {
   if (!agent.value) return
   err.value = ''
@@ -239,6 +272,17 @@ async function saveGeneral() {
   } finally {
     saving.value = false
   }
+}
+
+function editName() {
+  if (isArchived.value) return
+  setTab('settings')
+  setSection('general')
+  // 下一帧聚焦名称输入
+  requestAnimationFrame(() => {
+    document.getElementById('agent-name-input')?.focus()
+    ;(document.getElementById('agent-name-input') as HTMLInputElement | null)?.select()
+  })
 }
 
 function toggleSkill(id: string) {
@@ -397,7 +441,12 @@ onUnmounted(() => {
         </div>
         <div class="hero-text">
           <div class="title-row">
-            <h1>{{ agent.name }}</h1>
+            <h1
+              class="agent-title"
+              :class="{ editable: !isArchived }"
+              :title="isArchived ? undefined : '点击修改名称'"
+              @click="editName"
+            >{{ agent.name }}</h1>
             <span class="live" :class="{ on: statusOn }">
               <i class="dot" />{{ detailStatus }}
             </span>
@@ -634,7 +683,15 @@ onUnmounted(() => {
           </div>
           <label class="field">
             <span class="label">名称</span>
-            <input v-model="form.name" type="text" maxlength="64" />
+            <input
+              id="agent-name-input"
+              v-model="form.name"
+              type="text"
+              maxlength="64"
+              :disabled="isArchived"
+              placeholder="智能体名称"
+              @keydown.enter.prevent="saveProfile"
+            />
           </label>
           <label class="field">
             <span class="label">描述</span>
@@ -642,6 +699,7 @@ onUnmounted(() => {
               v-model="form.description"
               rows="3"
               maxlength="255"
+              :disabled="isArchived"
               placeholder="这个智能体能做什么？"
             />
             <span class="counter">{{ form.description.length }} / 255</span>
@@ -650,6 +708,11 @@ onUnmounted(() => {
             <span class="label">标签</span>
             <input type="text" disabled placeholder="用于分类这个智能体的工作区标签。（二期）" />
           </label>
+          <div class="set-actions">
+            <button type="button" class="btn-primary" :disabled="saving || isArchived" @click="saveProfile">
+              {{ saving ? '保存中…' : '保存资料' }}
+            </button>
+          </div>
         </section>
 
         <section class="set-block">
@@ -819,6 +882,15 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 h1 { margin: 0; font-size: 24px; }
+.agent-title.editable {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0 4px;
+  margin: 0 -4px;
+}
+.agent-title.editable:hover {
+  background: #f3f4f6;
+}
 .live {
   display: inline-flex;
   align-items: center;
