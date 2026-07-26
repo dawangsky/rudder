@@ -129,7 +129,7 @@ async function onSubmit() {
   <div class="login-page">
     <form class="login-card" @submit.prevent="onSubmit">
       <h1>Rudder</h1>
-      <p class="hint">{{ mode === 'login' ? '登录后进入对话（默认首页）' : '注册后自动创建默认工作区' }}</p>
+      <p v-if="mode === 'register'" class="hint">注册后自动创建默认工作区</p>
 
       <div ref="emailWrap" class="email-field">
         <span class="label">邮箱</span>
