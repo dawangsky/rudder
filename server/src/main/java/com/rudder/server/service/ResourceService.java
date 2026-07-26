@@ -52,7 +52,7 @@ public class ResourceService {
     public Map<String, Object> createAgent(AuthPrincipal p, Map<String, Object> body) {
         String provider = str(body.get("provider"));
         if (!WorkdirResolver.isAllowedProvider(provider)) {
-            throw new IllegalArgumentException("不支持的 Provider，请选择 cursor / claude_code / codex");
+            throw new IllegalArgumentException("不支持的 Provider，请选择 cursor / claude_code / codex / stub");
         }
         AgentEntity a = new AgentEntity();
         a.setWorkspaceId(p.workspaceId());
@@ -61,15 +61,29 @@ public class ResourceService {
         a.setDescription(str(body.get("description")));
         a.setInstructions(str(body.get("instructions")));
         a.setProvider(provider.toLowerCase());
-        // 须先在「运行时」手动添加且当前在线，才允许创建该 Provider 的智能体
-        boolean runtimeOnline = listRuntimes(p).stream().anyMatch(r ->
-                provider.equalsIgnoreCase(String.valueOf(r.get("provider")))
-                        && "online".equals(String.valueOf(r.get("status"))));
+        // 须先有对应 Provider 的在线 Runtime（自动探测或手动添加）
+        var runtimes = listRuntimes(p);
+        Long bindRuntimeId = asLong(body.get("runtimeId"));
+        boolean runtimeOnline = runtimes.stream().anyMatch(r -> {
+            if (!provider.equalsIgnoreCase(String.valueOf(r.get("provider")))) return false;
+            if (!"online".equals(String.valueOf(r.get("status")))) return false;
+            if (bindRuntimeId == null) return true;
+            return String.valueOf(bindRuntimeId).equals(String.valueOf(r.get("id")));
+        });
         if (!runtimeOnline) {
             throw new IllegalArgumentException(
-                    "运行时「" + provider + "」未添加或不在线。请先到「运行时」页添加（本机须已安装对应 CLI）");
+                    "运行时「" + provider + "」未添加或不在线。请先到「运行时」页确认本机已安装并在线");
         }
-        a.setRuntimeId(asLong(body.get("runtimeId")));
+        if (bindRuntimeId == null) {
+            bindRuntimeId = runtimes.stream()
+                    .filter(r -> provider.equalsIgnoreCase(String.valueOf(r.get("provider")))
+                            && "online".equals(String.valueOf(r.get("status"))))
+                    .map(r -> asLong(r.get("id")))
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+        }
+        a.setRuntimeId(bindRuntimeId);
         a.setMaxConcurrency(body.get("maxConcurrency") == null ? 1 : ((Number) body.get("maxConcurrency")).intValue());
         a.setStatus("idle");
         a.setCreatedAt(LocalDateTime.now());
@@ -143,6 +157,8 @@ public class ResourceService {
         m.put("maxConcurrency", a.getMaxConcurrency());
         m.put("status", a.getStatus());
         m.put("skillIds", skillIds.stream().map(String::valueOf).collect(Collectors.toList()));
+        m.put("createdAt", a.getCreatedAt() == null ? null : a.getCreatedAt().toString());
+        m.put("updatedAt", a.getUpdatedAt() == null ? null : a.getUpdatedAt().toString());
         return m;
     }
 
