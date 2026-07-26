@@ -213,6 +213,34 @@ public class AuthService {
         return listWorkspaceViews(principal.userId());
     }
 
+    /** 当前工作区成员（负责人选择等）。 */
+    public List<Map<String, Object>> listWorkspaceMembers(AuthPrincipal principal) {
+        requireSession(principal);
+        if (principal.workspaceId() == null) {
+            throw new IllegalArgumentException("尚未加入工作区");
+        }
+        List<WorkspaceMemberEntity> members = workspaceMemberMapper.selectList(
+                new LambdaQueryWrapper<WorkspaceMemberEntity>()
+                        .eq(WorkspaceMemberEntity::getWorkspaceId, principal.workspaceId())
+                        .orderByAsc(WorkspaceMemberEntity::getId));
+        if (members.isEmpty()) return List.of();
+        List<Long> userIds = members.stream().map(WorkspaceMemberEntity::getUserId).toList();
+        Map<Long, UserEntity> users = userMapper.selectBatchIds(userIds).stream()
+                .collect(Collectors.toMap(UserEntity::getId, u -> u, (a, b) -> a));
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (WorkspaceMemberEntity m : members) {
+            UserEntity u = users.get(m.getUserId());
+            if (u == null) continue;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", String.valueOf(u.getId()));
+            row.put("email", u.getEmail());
+            row.put("displayName", StringUtils.hasText(u.getDisplayName()) ? u.getDisplayName() : u.getEmail());
+            row.put("role", m.getRole());
+            out.add(row);
+        }
+        return out;
+    }
+
     /** 切换当前工作区（须为成员）。 */
     @Transactional
     public Map<String, Object> switchWorkspace(AuthPrincipal principal, Long workspaceId) {

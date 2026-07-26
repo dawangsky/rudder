@@ -90,3 +90,23 @@ CREATE TABLE IF NOT EXISTS rb_runtime_skill (
     KEY idx_rt_skill_ws (workspace_id),
     KEY idx_rt_skill_runtime (runtime_id)
 ) COMMENT='Daemon 上报的本机 skill 缓存';
+
+CREATE TABLE IF NOT EXISTS rb_project (
+    id                BIGINT PRIMARY KEY,
+    workspace_id      BIGINT NOT NULL,
+    name              VARCHAR(128) NOT NULL,
+    description       TEXT NULL,
+    status            VARCHAR(32) NOT NULL DEFAULT 'planned' COMMENT 'planned|in_progress|completed|canceled',
+    priority          VARCHAR(32) NOT NULL DEFAULT 'none' COMMENT 'none|low|medium|high|urgent',
+    assignee_user_id  BIGINT NULL,
+    local_path        VARCHAR(1024) NULL COMMENT '本机绝对路径（优先执行目录）',
+    repo_url          VARCHAR(512) NULL COMMENT '代码仓库 URL',
+    start_date        DATE NULL,
+    due_date          DATE NULL,
+    created_at        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    deleted           TINYINT NOT NULL DEFAULT 0,
+    KEY idx_project_ws (workspace_id),
+    KEY idx_project_assignee (assignee_user_id),
+    KEY idx_project_status (workspace_id, status)
+) COMMENT='工作区项目';

@@ -66,6 +66,12 @@ public class AuthController {
         return authService.listWorkspaces(requireSession());
     }
 
+    /** 当前工作区成员。 */
+    @GetMapping("/workspace-members")
+    public List<Map<String, Object>> workspaceMembers() {
+        return authService.listWorkspaceMembers(requireSession());
+    }
+
     /** 创建工作区（可多次，一账号多工作区）。 */
     @PostMapping("/workspaces")
     public Map<String, Object> createWorkspace(@RequestBody Map<String, Object> body) {

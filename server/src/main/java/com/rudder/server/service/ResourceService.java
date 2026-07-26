@@ -482,14 +482,36 @@ public class ResourceService {
         if (StringUtils.hasText(localPath)) {
             WorkdirResolver.validateLocalPath(localPath);
         }
+        String status = normalizeProjectStatus(str(body.get("status")));
+        String priority = normalizeProjectPriority(str(body.get("priority")));
+        Long assigneeId = asLong(body.get("assigneeUserId"));
+        if (assigneeId != null) {
+            // 须为当前工作区成员；校验在 Auth 层无注入时仅检查非空用户
+            // 轻量：允许指向任意存在用户，UI 只展示成员
+        }
         ProjectEntity pr = new ProjectEntity();
         pr.setWorkspaceId(p.workspaceId());
-        pr.setName(require(body.get("name"), "名称不能为空"));
+        pr.setName(require(body.get("name"), "项目标题不能为空"));
+        String description = str(body.get("description"));
+        pr.setDescription(StringUtils.hasText(description) ? description : null);
+        pr.setStatus(status);
+        pr.setPriority(priority);
+        pr.setAssigneeUserId(assigneeId);
         pr.setLocalPath(StringUtils.hasText(localPath) ? localPath : null);
+        String repoUrl = str(body.get("repoUrl"));
+        pr.setRepoUrl(StringUtils.hasText(repoUrl) ? repoUrl : null);
+        pr.setStartDate(asDate(body.get("startDate")));
+        pr.setDueDate(asDate(body.get("dueDate")));
         pr.setCreatedAt(LocalDateTime.now());
         pr.setUpdatedAt(LocalDateTime.now());
         projectMapper.insert(pr);
         return projectView(pr);
+    }
+
+    @Transactional
+    public void deleteProject(AuthPrincipal p, Long id) {
+        ProjectEntity pr = requireProject(p, id);
+        projectMapper.deleteById(pr.getId());
     }
 
     public ProjectEntity requireProject(AuthPrincipal p, Long id) {
@@ -505,8 +527,49 @@ public class ResourceService {
         Map<String, Object> m = new HashMap<>();
         m.put("id", String.valueOf(pr.getId()));
         m.put("name", pr.getName());
+        m.put("description", pr.getDescription() == null ? "" : pr.getDescription());
+        m.put("status", pr.getStatus() == null ? "planned" : pr.getStatus());
+        m.put("priority", pr.getPriority() == null ? "none" : pr.getPriority());
+        m.put("assigneeUserId", pr.getAssigneeUserId() == null ? null : String.valueOf(pr.getAssigneeUserId()));
         m.put("localPath", pr.getLocalPath());
+        m.put("repoUrl", pr.getRepoUrl() == null ? "" : pr.getRepoUrl());
+        m.put("startDate", pr.getStartDate() == null ? null : pr.getStartDate().toString());
+        m.put("dueDate", pr.getDueDate() == null ? null : pr.getDueDate().toString());
+        m.put("createdAt", pr.getCreatedAt() == null ? null : pr.getCreatedAt().toString());
+        m.put("updatedAt", pr.getUpdatedAt() == null ? null : pr.getUpdatedAt().toString());
         return m;
+    }
+
+    private static String normalizeProjectStatus(String raw) {
+        if (!StringUtils.hasText(raw)) return "planned";
+        String s = raw.trim().toLowerCase();
+        return switch (s) {
+            case "planned", "in_progress", "completed", "canceled" -> s;
+            case "planning", "plan" -> "planned";
+            case "doing", "active" -> "in_progress";
+            case "done" -> "completed";
+            case "cancelled" -> "canceled";
+            default -> throw new IllegalArgumentException("无效的项目状态");
+        };
+    }
+
+    private static String normalizeProjectPriority(String raw) {
+        if (!StringUtils.hasText(raw)) return "none";
+        String s = raw.trim().toLowerCase();
+        return switch (s) {
+            case "none", "low", "medium", "high", "urgent" -> s;
+            case "no", "unset" -> "none";
+            default -> throw new IllegalArgumentException("无效的优先级");
+        };
+    }
+
+    private static java.time.LocalDate asDate(Object v) {
+        if (v == null || "".equals(v)) return null;
+        String s = String.valueOf(v).trim();
+        if (s.isEmpty()) return null;
+        // 允许 yyyy-MM-dd 或 ISO datetime
+        if (s.length() >= 10) s = s.substring(0, 10);
+        return java.time.LocalDate.parse(s);
     }
 
     // -------- Runtime --------

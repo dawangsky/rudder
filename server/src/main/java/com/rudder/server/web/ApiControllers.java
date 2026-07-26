@@ -110,6 +110,12 @@ public class ApiControllers {
         return resourceService.createProject(session(), body);
     }
 
+    @DeleteMapping("/projects/{id}")
+    public Map<String, Object> deleteProject(@PathVariable Long id) {
+        resourceService.deleteProject(session(), id);
+        return Map.of("ok", true);
+    }
+
     // Runtime（仅展示已手动添加并成功注册的；轮询用于刷新在线状态）
     @GetMapping("/runtimes")
     public List<Map<String, Object>> runtimes() { return resourceService.listRuntimes(session()); }
