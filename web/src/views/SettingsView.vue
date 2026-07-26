@@ -120,7 +120,12 @@ async function toggleEnabled(p: ProtocolRecord, enabled: boolean) {
   try {
     await updateProtocol(p.value, { enabled })
   } catch (e) {
-    protoErr.value = e instanceof Error ? e.message : '更新失败'
+    const msg = e instanceof Error ? e.message : '更新失败'
+    protoErr.value = msg
+    // 停用被拒时显式提示，并刷新以还原开关状态
+    if (!enabled) {
+      window.alert(msg)
+    }
     await refreshProtocols()
   } finally {
     protoBusy.value = false
@@ -202,7 +207,9 @@ async function removeProtocol(p: ProtocolRecord) {
   try {
     await deleteProtocol(p.value)
   } catch (e) {
-    protoErr.value = e instanceof Error ? e.message : '删除失败'
+    const msg = e instanceof Error ? e.message : '删除失败'
+    protoErr.value = msg
+    window.alert(msg)
   } finally {
     protoBusy.value = false
   }

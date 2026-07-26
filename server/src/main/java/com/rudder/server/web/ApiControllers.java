@@ -227,9 +227,13 @@ public class ApiControllers {
 
     @PutMapping("/protocols/{code}")
     public Map<String, Object> updateProtocol(@PathVariable String code, @RequestBody Map<String, Object> body) {
+        boolean disabling = body.containsKey("enabled") && !isTruthy(body.get("enabled"));
+        if (disabling) {
+            resourceService.assertNoActiveAgentsUsingProtocol(session(), code);
+        }
         Map<String, Object> updated = protocolService.updateProtocol(session(), code, body);
         // 停用后立即清掉该协议相关运行时，避免仍显示「已探测」
-        if (body.containsKey("enabled") && !isTruthy(body.get("enabled"))) {
+        if (disabling) {
             resourceService.purgeRuntimesForProtocol(session(), code);
         }
         return updated;
@@ -237,6 +241,7 @@ public class ApiControllers {
 
     @DeleteMapping("/protocols/{code}")
     public Map<String, Object> deleteProtocol(@PathVariable String code) {
+        resourceService.assertNoActiveAgentsUsingProtocol(session(), code);
         protocolService.deleteProtocol(session(), code);
         resourceService.purgeRuntimesForProtocol(session(), code);
         return Map.of("ok", true);

@@ -31,10 +31,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Agent / Skill / Project / Runtime / Inbox 业务。 */
@@ -727,6 +730,49 @@ public class ResourceService {
             runtimeMapper.deleteById(r.getId());
             wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(r.getId())));
         }
+    }
+
+    /**
+     * 停用/删除协议前：若仍有未归档智能体绑定该协议（或以其为 base），则拒绝。
+     */
+    public void assertNoActiveAgentsUsingProtocol(AuthPrincipal p, String protocolCode) {
+        if (p.workspaceId() == null || !StringUtils.hasText(protocolCode)) return;
+        String code = protocolCode.toLowerCase().trim();
+
+        Set<Long> runtimeIds = new HashSet<>();
+        List<RuntimeEntity> runtimes = runtimeMapper.selectList(new LambdaQueryWrapper<RuntimeEntity>()
+                .eq(RuntimeEntity::getWorkspaceId, p.workspaceId()));
+        for (RuntimeEntity r : runtimes) {
+            String provider = r.getProvider() == null ? "" : r.getProvider().toLowerCase();
+            String base = protocolService.baseProvider(p.workspaceId(), provider);
+            if (code.equals(provider) || code.equals(base)) {
+                runtimeIds.add(r.getId());
+            }
+        }
+
+        List<AgentEntity> agents = agentMapper.selectList(new LambdaQueryWrapper<AgentEntity>()
+                .eq(AgentEntity::getWorkspaceId, p.workspaceId())
+                .and(w -> w.isNull(AgentEntity::getStatus)
+                        .or()
+                        .ne(AgentEntity::getStatus, "archived")));
+
+        List<String> names = new ArrayList<>();
+        for (AgentEntity a : agents) {
+            String provider = a.getProvider() == null ? "" : a.getProvider().toLowerCase();
+            String base = protocolService.baseProvider(p.workspaceId(), provider);
+            boolean byProvider = code.equals(provider) || code.equals(base);
+            boolean byRuntime = a.getRuntimeId() != null && runtimeIds.contains(a.getRuntimeId());
+            if (byProvider || byRuntime) {
+                names.add(StringUtils.hasText(a.getName()) ? a.getName() : String.valueOf(a.getId()));
+            }
+        }
+        if (names.isEmpty()) return;
+
+        String sample = names.stream().limit(3).collect(Collectors.joining("、"));
+        String more = names.size() > 3 ? " 等" : "";
+        throw new IllegalArgumentException(
+                "仍有 " + names.size() + " 个智能体在使用该协议（" + sample + more
+                        + "）。请先归档或删除这些智能体后再停用协议。");
     }
 
     /**
