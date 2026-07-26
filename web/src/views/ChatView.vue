@@ -244,10 +244,16 @@ onUnmounted(() => ws?.close())
           <button
             type="submit"
             class="send"
+            :class="{ 'send-off': !hasAgents || composerDisabled || !draft.trim() }"
             :disabled="composerDisabled || !draft.trim() || !hasAgents"
             aria-label="发送"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <!-- 禁用：空心圆 + 箭头；可用：实心圆 + 箭头 -->
+            <svg v-if="!hasAgents || composerDisabled || !draft.trim()" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" />
+              <path d="M12 16V8M12 8l-3.2 3.2M12 8l3.2 3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 19V5M12 5l-5 5M12 5l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
@@ -494,7 +500,7 @@ onUnmounted(() => ws?.close())
   height: 36px;
   border: none;
   border-radius: 50%;
-  background: #d1d5db;
+  background: #111827;
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -502,12 +508,12 @@ onUnmounted(() => ws?.close())
   cursor: pointer;
   flex-shrink: 0;
 }
-.send:not(:disabled) {
-  background: #111827;
-}
+.send.send-off,
 .send:disabled {
+  background: transparent;
+  color: #c4c4c4;
   cursor: not-allowed;
-  opacity: 0.7;
+  box-shadow: none;
 }
 
 .banner { margin: 0 16px 8px; font-size: 13px; }
