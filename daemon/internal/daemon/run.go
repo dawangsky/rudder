@@ -123,10 +123,8 @@ func syncProviders(
 		customCmds[c.ProviderKey] = c.Command
 	}
 
+	// 每次 sync 都 upsert：UI 删掉服务端记录后，内存里旧 runtimeId 不能挡住重新注册
 	for p, meta := range wantMeta {
-		if _, ok := runtimeIDs[p]; ok {
-			continue
-		}
 		if !detect.IsCustomProviderKey(p) {
 			if err := detect.RequireInstalled(p); err != nil {
 				fmt.Printf("skip provider=%s: %v\n", p, err)
@@ -138,8 +136,11 @@ func syncProviders(
 			fmt.Printf("register runtime %s failed: %v\n", p, err)
 			continue
 		}
-		runtimeIDs[p] = fmt.Sprint(rt["id"])
-		fmt.Printf("registered runtime provider=%s id=%s\n", p, runtimeIDs[p])
+		id := fmt.Sprint(rt["id"])
+		if prev, ok := runtimeIDs[p]; !ok || prev != id {
+			fmt.Printf("registered runtime provider=%s id=%s\n", p, id)
+		}
+		runtimeIDs[p] = id
 	}
 	for p := range runtimeIDs {
 		if _, ok := wantMeta[p]; !ok {
