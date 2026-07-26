@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 /**
  * 工作目录解析：项目本地路径优先，否则沙箱路径。
  * 根目录可通过环境变量 RUDDER_WORKSPACES_ROOT 覆盖。
+ * 协议白名单以 {@link ProtocolService} 工作区目录为准；此处仅保留静态解析兜底。
  */
 public final class WorkdirResolver {
 
@@ -18,22 +19,15 @@ public final class WorkdirResolver {
             "/", "/etc", "/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc"
     );
 
-    /**
-     * 与 Daemon detect.Catalog 保持一致的基础协议白名单。
-     * 含主流（OpenCode / Gemini / Copilot 等）与国产（CodeBuddy / Qwen / Kimi / Qoder / Trae 等）。
-     */
-    private static final List<String> BASE_PROVIDERS = List.of(
-            "cursor", "claude_code", "codex", "opencode", "gemini", "copilot", "aider", "goose",
-            "codebuddy", "qwen", "kimi", "qoder", "traecli", "kiro", "grok", "hermes", "pi",
-            "openclaw", "antigravity", "deveco", "stub"
-    );
-
-    /** 按长度降序，保证 custom_claude_code_xxx 先匹配 claude_code */
-    private static final List<String> BASE_PROVIDERS_BY_LEN = BASE_PROVIDERS.stream()
+    /** 内置种子 code，用于无工作区上下文时的 custom_ 解析兜底。 */
+    private static final List<String> DEFAULT_BASES_BY_LEN = BuiltinProtocols.ALL.stream()
+            .map(BuiltinProtocols.Spec::code)
             .sorted(Comparator.comparingInt(String::length).reversed().thenComparing(s -> s))
             .collect(Collectors.toList());
 
-    private static final Set<String> BASE_PROVIDER_SET = Set.copyOf(BASE_PROVIDERS);
+    private static final Set<String> DEFAULT_BASE_SET = BuiltinProtocols.ALL.stream()
+            .map(BuiltinProtocols.Spec::code)
+            .collect(Collectors.toUnmodifiableSet());
 
     private WorkdirResolver() {
     }
@@ -73,7 +67,6 @@ public final class WorkdirResolver {
         if (s.equals("/") || s.equals(home) || DENY_PREFIXES.contains(s)) {
             throw new IllegalArgumentException("危险或过宽的本地路径被拒绝: " + s);
         }
-        // 禁止系统关键前缀（除用户 home 下目录）
         for (String deny : DENY_PREFIXES) {
             if (!"/".equals(deny) && s.startsWith(deny + "/") && (home == null || !s.startsWith(home))) {
                 throw new IllegalArgumentException("路径不在允许范围: " + s);
@@ -90,41 +83,36 @@ public final class WorkdirResolver {
         }
     }
 
+    /**
+     * 静态兜底白名单（仅内置种子）。业务校验请用 {@link ProtocolService#isAllowedProvider}。
+     */
     public static boolean isAllowedProvider(String provider) {
-        if (provider == null) {
-            return false;
-        }
+        if (provider == null) return false;
         String p = provider.toLowerCase(Locale.ROOT);
-        if (BASE_PROVIDER_SET.contains(p)) {
-            return true;
-        }
-        // 自定义运行时：custom_<base>_<hash8>
+        if (DEFAULT_BASE_SET.contains(p)) return true;
         if (p.startsWith("custom_")) {
-            return BASE_PROVIDER_SET.contains(baseProvider(p));
+            return DEFAULT_BASE_SET.contains(baseProviderStatic(p));
         }
         return false;
     }
 
-    /** 自定义运行时解析基础协议；内置原样返回。 */
     public static String baseProvider(String provider) {
-        if (provider == null) {
-            return "";
-        }
+        return baseProviderStatic(provider);
+    }
+
+    /** 无工作区上下文时的基础协议解析。 */
+    public static String baseProviderStatic(String provider) {
+        if (provider == null) return "";
         String p = provider.toLowerCase(Locale.ROOT);
-        if (!p.startsWith("custom_")) {
-            return p;
-        }
+        if (!p.startsWith("custom_")) return p;
         String rest = p.substring("custom_".length());
-        for (String base : BASE_PROVIDERS_BY_LEN) {
-            if (rest.startsWith(base + "_")) {
-                return base;
-            }
+        for (String base : DEFAULT_BASES_BY_LEN) {
+            if (rest.startsWith(base + "_")) return base;
         }
         return p;
     }
 
-    /** 供测试与文档列出支持的基础协议。 */
     public static List<String> allowedBaseProviders() {
-        return BASE_PROVIDERS;
+        return BuiltinProtocols.ALL.stream().map(BuiltinProtocols.Spec::code).collect(Collectors.toList());
     }
 }

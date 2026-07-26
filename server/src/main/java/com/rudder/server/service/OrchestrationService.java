@@ -46,6 +46,7 @@ public class OrchestrationService {
     private final IssueCommentMapper issueCommentMapper;
     private final RuntimeMapper runtimeMapper;
     private final ResourceService resourceService;
+    private final ProtocolService protocolService;
     private final NettyWsHub wsHub;
 
     // ===== Chat =====
@@ -422,8 +423,8 @@ public class OrchestrationService {
             return Map.of("task", (Object) null);
         }
         boolean providerMatch = agent.getProvider().equals(runtime.getProvider())
-                || WorkdirResolver.baseProvider(agent.getProvider())
-                        .equals(WorkdirResolver.baseProvider(runtime.getProvider()));
+                || protocolService.baseProvider(daemon.workspaceId(), agent.getProvider())
+                        .equals(protocolService.baseProvider(daemon.workspaceId(), runtime.getProvider()));
         if (task.getRuntimeId() == null
                 && !"stub".equals(runtime.getProvider())
                 && !providerMatch) {

@@ -4,6 +4,7 @@ import com.rudder.server.auth.AuthContext;
 import com.rudder.server.auth.AuthPrincipal;
 import com.rudder.server.domain.TokenTypes;
 import com.rudder.server.service.OrchestrationService;
+import com.rudder.server.service.ProtocolService;
 import com.rudder.server.service.ResourceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +20,7 @@ public class ApiControllers {
 
     private final ResourceService resourceService;
     private final OrchestrationService orchestrationService;
+    private final ProtocolService protocolService;
 
     private AuthPrincipal session() {
         AuthPrincipal p = AuthContext.get();
@@ -209,6 +211,34 @@ public class ApiControllers {
     public Map<String, Object> readInbox(@PathVariable Long id) {
         resourceService.markRead(session(), id);
         return Map.of("ok", true);
+    }
+
+    // Protocol（工作区运行时协议目录）
+    @GetMapping("/protocols")
+    public List<Map<String, Object>> protocols(
+            @RequestParam(required = false, defaultValue = "false") boolean enabledOnly) {
+        return protocolService.listProtocols(session(), enabledOnly);
+    }
+
+    @PostMapping("/protocols")
+    public Map<String, Object> createProtocol(@RequestBody Map<String, Object> body) {
+        return protocolService.createProtocol(session(), body);
+    }
+
+    @PutMapping("/protocols/{code}")
+    public Map<String, Object> updateProtocol(@PathVariable String code, @RequestBody Map<String, Object> body) {
+        return protocolService.updateProtocol(session(), code, body);
+    }
+
+    @DeleteMapping("/protocols/{code}")
+    public Map<String, Object> deleteProtocol(@PathVariable String code) {
+        protocolService.deleteProtocol(session(), code);
+        return Map.of("ok", true);
+    }
+
+    @GetMapping("/daemon/protocols")
+    public List<Map<String, Object>> daemonProtocols() {
+        return protocolService.listEnabledForDaemon(daemon());
     }
 
     // Daemon

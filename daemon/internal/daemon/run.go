@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dawangsky/rudder/daemon/internal/client"
@@ -108,6 +109,18 @@ func syncProviders(
 	runtimeIDs map[string]string,
 	customCmds map[string]string,
 ) {
+	if remote, err := api.ListProtocols(); err == nil && len(remote) > 0 {
+		specs := make([]detect.ProviderSpec, 0, len(remote))
+		for _, r := range remote {
+			code := strings.TrimSpace(r.Code)
+			if code == "" {
+				continue
+			}
+			specs = append(specs, detect.ProviderSpec{ID: code, Bins: r.Bins})
+		}
+		detect.ApplyRemoteCatalog(specs)
+	}
+
 	wantMeta := map[string]string{}
 
 	for _, p := range detect.InstalledBuiltins() {

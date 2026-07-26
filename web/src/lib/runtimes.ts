@@ -45,10 +45,9 @@ export type ProviderMeta = {
 }
 
 /**
- * 与 Daemon detect.Catalog / Server WorkdirResolver 保持一致。
- * 含主流国际协议与国产 coding agent CLI。
+ * 默认协议种子（离线兜底）。运行时目录以工作区 API 为准，见 setProviderCatalog。
  */
-export const PROVIDERS: readonly ProviderMeta[] = [
+export const DEFAULT_PROVIDERS: readonly ProviderMeta[] = [
   { value: 'claude_code', label: 'Claude Code', short: 'Claude', region: 'intl', commandHint: '例如：claude -p "{prompt}"' },
   { value: 'cursor', label: 'Cursor', short: 'Cursor', region: 'intl', commandHint: '例如：agent "{prompt}"' },
   { value: 'codex', label: 'Codex', short: 'Codex', region: 'intl', commandHint: '例如：codex exec "{prompt}"' },
@@ -72,18 +71,36 @@ export const PROVIDERS: readonly ProviderMeta[] = [
   { value: 'stub', label: 'Stub', short: 'Stub', region: 'test', commandHint: '无需本机 CLI（测试用）' },
 ] as const
 
+/** @deprecated 使用 getProviderCatalog()；保留别名兼容旧引用 */
+export const PROVIDERS = DEFAULT_PROVIDERS
+
+let catalog: ProviderMeta[] = DEFAULT_PROVIDERS.map((p) => ({ ...p }))
+
+export function setProviderCatalog(list: ProviderMeta[]) {
+  catalog = list?.length ? list.map((p) => ({ ...p })) : DEFAULT_PROVIDERS.map((p) => ({ ...p }))
+}
+
+export function getProviderCatalog(): ProviderMeta[] {
+  return catalog
+}
+
 /** 基础协议 id（按长度降序，解析 custom_<base>_<hash>） */
-export const BASE_PROVIDER_IDS = [...PROVIDERS.map((p) => p.value)].sort(
+export function baseProviderIds(): string[] {
+  return [...catalog.map((p) => p.value)].sort((a, b) => b.length - a.length || a.localeCompare(b))
+}
+
+/** @deprecated 使用 baseProviderIds() */
+export const BASE_PROVIDER_IDS = [...DEFAULT_PROVIDERS.map((p) => p.value)].sort(
   (a, b) => b.length - a.length || a.localeCompare(b),
 )
 
-/** 添加自定义运行时可选协议（不含 stub） */
-export const PROTOCOL_OPTIONS = PROVIDERS.filter((p) => p.value !== 'stub')
+/** @deprecated 使用 protocolOptions（@/lib/protocols） */
+export const PROTOCOL_OPTIONS = DEFAULT_PROVIDERS.filter((p) => p.value !== 'stub')
 
 export function baseProviderOf(provider: string) {
   if (!provider?.startsWith('custom_')) return provider
   const rest = provider.slice('custom_'.length)
-  for (const base of BASE_PROVIDER_IDS) {
+  for (const base of baseProviderIds()) {
     if (rest.startsWith(`${base}_`)) return base
   }
   return provider
@@ -91,7 +108,10 @@ export function baseProviderOf(provider: string) {
 
 export function providerMeta(code: string): ProviderMeta {
   const base = baseProviderOf(code)
-  return PROVIDERS.find((p) => p.value === base) || { value: code, label: code, short: code }
+  return (
+    catalog.find((p) => p.value === base) ||
+    DEFAULT_PROVIDERS.find((p) => p.value === base) || { value: code, label: code, short: code }
+  )
 }
 
 export function displayName(r: Pick<Runtime, 'provider' | 'displayName'>) {

@@ -48,6 +48,7 @@ public class ResourceService {
     private final RuntimeSkillMapper runtimeSkillMapper;
     private final ProjectMapper projectMapper;
     private final RuntimeMapper runtimeMapper;
+    private final ProtocolService protocolService;
     private final TaskMapper taskMapper;
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
@@ -67,7 +68,7 @@ public class ResourceService {
     @Transactional
     public Map<String, Object> createAgent(AuthPrincipal p, Map<String, Object> body) {
         String provider = str(body.get("provider"));
-        if (!WorkdirResolver.isAllowedProvider(provider)) {
+        if (!protocolService.isAllowedProvider(p.workspaceId(), provider)) {
             throw new IllegalArgumentException("不支持的 Provider（含自定义 custom_*）");
         }
         AgentEntity a = new AgentEntity();
@@ -132,7 +133,7 @@ public class ResourceService {
         if (body.containsKey("description")) a.setDescription(str(body.get("description")));
         if (body.containsKey("provider")) {
             String provider = str(body.get("provider"));
-            if (!WorkdirResolver.isAllowedProvider(provider)) {
+            if (!protocolService.isAllowedProvider(p.workspaceId(), provider)) {
                 throw new IllegalArgumentException("不支持的 Provider");
             }
             a.setProvider(provider.toLowerCase());
@@ -607,7 +608,7 @@ public class ResourceService {
     @Transactional
     public Map<String, Object> upsertRuntime(Long workspaceId, String daemonId, String provider,
                                              String hostName, String metaJson) {
-        if (!WorkdirResolver.isAllowedProvider(provider)) {
+        if (!protocolService.isAllowedProvider(workspaceId, provider)) {
             throw new IllegalArgumentException("不支持的 Provider: " + provider);
         }
         if (!StringUtils.hasText(daemonId)) {
@@ -697,7 +698,7 @@ public class ResourceService {
     @Transactional
     public Map<String, Object> addRuntimeForSession(AuthPrincipal p, String provider, String hostName,
                                                     String daemonId) {
-        if (!WorkdirResolver.isAllowedProvider(provider)) {
+        if (!protocolService.isAllowedProvider(p.workspaceId(), provider)) {
             throw new IllegalArgumentException("不支持的 Provider: " + provider);
         }
         String host = StringUtils.hasText(hostName) ? hostName : "";
@@ -755,7 +756,7 @@ public class ResourceService {
         String displayName = "";
         String command = "";
         String description = "";
-        String baseProvider = WorkdirResolver.baseProvider(r.getProvider());
+        String baseProvider = protocolService.baseProvider(r.getWorkspaceId(), r.getProvider());
         if (StringUtils.hasText(r.getMetaJson())) {
             try {
                 @SuppressWarnings("unchecked")

@@ -38,6 +38,7 @@ public class AuthService {
     private final WorkspaceMapper workspaceMapper;
     private final WorkspaceMemberMapper workspaceMemberMapper;
     private final UserTokenMapper userTokenMapper;
+    private final ProtocolService protocolService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Transactional
@@ -199,6 +200,8 @@ public class AuthService {
         member.setLastAccessedAt(now);
         member.setCreatedAt(now);
         workspaceMemberMapper.insert(member);
+
+        protocolService.seedWorkspace(workspace.getId());
 
         user.setActiveWorkspaceId(workspace.getId());
         user.setUpdatedAt(now);

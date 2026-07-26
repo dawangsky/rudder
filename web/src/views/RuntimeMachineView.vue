@@ -15,7 +15,6 @@ import RuntimeAgentAvatars from '@/components/RuntimeAgentAvatars.vue'
 import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import type { Agent } from '@/lib/agents'
 import {
-  PROTOCOL_OPTIONS,
   commandHintFor,
   displayName,
   formatHeartbeat,
@@ -27,6 +26,7 @@ import {
   type LocalMachineHint,
   type Runtime,
 } from '@/lib/runtimes'
+import { loadProtocols, protocolOptions } from '@/lib/protocols'
 
 const route = useRoute()
 const router = useRouter()
@@ -59,11 +59,9 @@ const ackDelete = ref(false)
 const removing = ref(false)
 let timer: number | undefined
 
-/** 第 1 步：选择基础协议（内置自动探测；此处用于自定义启动命令） */
-// PROTOCOL_OPTIONS 来自 @/lib/runtimes
-
+/** 第 1 步：选择基础协议（目录来自设置 → 运行时协议） */
 const selectedProtocol = computed(
-  () => PROTOCOL_OPTIONS.find((p) => p.value === provider.value) || PROTOCOL_OPTIONS[0],
+  () => protocolOptions.value.find((p) => p.value === provider.value) || protocolOptions.value[0],
 )
 
 function onIconsChanged() {
@@ -354,6 +352,7 @@ async function addProvider() {
 watch(daemonId, loadAlias, { immediate: true })
 
 onMounted(() => {
+  void loadProtocols()
   load()
   refreshLocal()
   window.addEventListener(ICONS_CHANGED_EVENT, onIconsChanged)
@@ -565,7 +564,7 @@ onUnmounted(() => {
           <p class="step-hint">此运行时使用的底层 CLI 协议。</p>
           <div class="protocol-grid">
             <button
-              v-for="p in PROTOCOL_OPTIONS"
+              v-for="p in protocolOptions"
               :key="p.value"
               type="button"
               class="protocol-card"

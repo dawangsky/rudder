@@ -10,6 +10,7 @@ import AgentAvatar from '@/components/AgentAvatar.vue'
 import AvatarPicker from '@/components/AvatarPicker.vue'
 import { pickRandomAvatar } from '@/lib/agentAvatars'
 import { PROVIDERS, baseProviderOf, displayName, type Runtime } from '@/lib/runtimes'
+import { enabledProtocols, loadProtocols } from '@/lib/protocols'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,7 +38,8 @@ const onlineRuntimes = computed(() =>
 )
 
 const providerChoices = computed(() => {
-  return PROVIDERS.filter((p) => {
+  const catalog = enabledProtocols.value.length ? enabledProtocols.value : PROVIDERS
+  return catalog.filter((p) => {
     return onlineRuntimes.value.some((r) => {
       const base = r.baseProvider || baseProviderOf(r.provider)
       return r.provider === p.value || base === p.value
@@ -124,7 +126,10 @@ async function create() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await loadProtocols()
+  await load()
+})
 </script>
 
 <template>

@@ -90,3 +90,17 @@ func (a *API) ReportSkills(daemonID, runtimeID string, skills []map[string]any) 
 		"skills":    skills,
 	}, nil)
 }
+
+// ProtocolSpec Server 下发的工作区启用协议。
+type ProtocolSpec struct {
+	Code  string   `json:"code"`
+	Bins  []string `json:"bins"`
+	Label string   `json:"label"`
+}
+
+// ListProtocols 拉取当前工作区已启用的运行时协议目录。
+func (a *API) ListProtocols() ([]ProtocolSpec, error) {
+	var out []ProtocolSpec
+	err := a.do(http.MethodGet, "/api/daemon/protocols", nil, &out)
+	return out, err
+}

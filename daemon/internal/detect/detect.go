@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ProviderSpec 内置运行时协议定义。
@@ -13,7 +14,7 @@ type ProviderSpec struct {
 	Bins []string // 本机可执行名（任一命中即视为已安装）；空表示无需探测
 }
 
-// Catalog 主流 + 国产 coding agent 协议目录（自动探测 / 自定义基础协议共用）。
+// Catalog 默认种子（Server 未下发目录时使用）。
 var Catalog = []ProviderSpec{
 	{ID: "cursor", Bins: []string{"cursor", "cursor-agent", "agent"}},
 	{ID: "claude_code", Bins: []string{"claude", "claude-code"}},
@@ -38,19 +39,63 @@ var Catalog = []ProviderSpec{
 	{ID: "stub", Bins: []string{}},
 }
 
-// ProviderBins 各 Provider 对应本机可执行名（任一命中即视为已安装）。
-var ProviderBins = func() map[string][]string {
-	m := make(map[string][]string, len(Catalog))
-	for _, p := range Catalog {
+var (
+	catalogMu     sync.RWMutex
+	remoteCatalog []ProviderSpec // 非空时覆盖 Catalog
+)
+
+// ProviderBins 各 Provider 对应本机可执行名（随 ApplyRemoteCatalog 更新）。
+var ProviderBins = binsFrom(Catalog)
+
+func binsFrom(list []ProviderSpec) map[string][]string {
+	m := make(map[string][]string, len(list))
+	for _, p := range list {
 		m[p.ID] = p.Bins
 	}
 	return m
-}()
+}
+
+func activeCatalog() []ProviderSpec {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	if len(remoteCatalog) > 0 {
+		out := make([]ProviderSpec, len(remoteCatalog))
+		copy(out, remoteCatalog)
+		return out
+	}
+	return Catalog
+}
+
+// ApplyRemoteCatalog 用 Server 下发的已启用协议覆盖本地探测目录。
+func ApplyRemoteCatalog(specs []ProviderSpec) {
+	catalogMu.Lock()
+	defer catalogMu.Unlock()
+	if len(specs) == 0 {
+		remoteCatalog = nil
+		ProviderBins = binsFrom(Catalog)
+		return
+	}
+	remoteCatalog = make([]ProviderSpec, len(specs))
+	copy(remoteCatalog, specs)
+	// stub 始终保留
+	hasStub := false
+	for _, s := range remoteCatalog {
+		if s.ID == "stub" {
+			hasStub = true
+			break
+		}
+	}
+	if !hasStub {
+		remoteCatalog = append(remoteCatalog, ProviderSpec{ID: "stub", Bins: []string{}})
+	}
+	ProviderBins = binsFrom(remoteCatalog)
+}
 
 // BaseProviderIDs 基础协议 id 列表（按长度降序，便于 custom_<base>_<hash> 解析）。
 func BaseProviderIDs() []string {
-	ids := make([]string, 0, len(Catalog))
-	for _, p := range Catalog {
+	list := activeCatalog()
+	ids := make([]string, 0, len(list))
+	for _, p := range list {
 		ids = append(ids, p.ID)
 	}
 	sort.Slice(ids, func(i, j int) bool {
@@ -62,10 +107,10 @@ func BaseProviderIDs() []string {
 	return ids
 }
 
-// BuiltinProviders 内置 Provider：Daemon 轮询时自动探测，本机已安装则会注册/恢复。
+// BuiltinProviders 内置 Provider：Daemon 轮询时自动探测（不含 stub）。
 func BuiltinProviders() []string {
-	out := make([]string, 0, len(Catalog))
-	for _, p := range Catalog {
+	out := make([]string, 0, len(activeCatalog()))
+	for _, p := range activeCatalog() {
 		if p.ID == "stub" {
 			continue
 		}
@@ -76,8 +121,8 @@ func BuiltinProviders() []string {
 
 // AllowedProviders 可注册的 Provider 列表（含 stub）。
 func AllowedProviders() []string {
-	out := make([]string, 0, len(Catalog))
-	for _, p := range Catalog {
+	out := make([]string, 0, len(activeCatalog()))
+	for _, p := range activeCatalog() {
 		out = append(out, p.ID)
 	}
 	return out
@@ -106,7 +151,10 @@ func InstalledBuiltins() []string {
 
 // IsAllowed 是否为已知 Provider（含 custom_<base>_<hash>）。
 func IsAllowed(provider string) bool {
-	if _, ok := ProviderBins[provider]; ok {
+	catalogMu.RLock()
+	_, ok := ProviderBins[provider]
+	catalogMu.RUnlock()
+	if ok {
 		return true
 	}
 	return IsCustomProviderKey(provider)
@@ -136,7 +184,9 @@ func IsInstalled(provider string) bool {
 	if provider == "stub" {
 		return true
 	}
+	catalogMu.RLock()
 	bins, ok := ProviderBins[provider]
+	catalogMu.RUnlock()
 	if !ok {
 		return false
 	}
@@ -163,7 +213,9 @@ func RequireInstalled(provider string) error {
 	if IsInstalled(provider) {
 		return nil
 	}
+	catalogMu.RLock()
 	bins := ProviderBins[provider]
+	catalogMu.RUnlock()
 	hint := fmt.Sprintf("本机未安装 %s，无法注册。请先安装并将其加入 PATH（查找命令: %s）", provider, strings.Join(bins, " / "))
 	switch provider {
 	case "claude_code":
@@ -182,7 +234,7 @@ func RequireInstalled(provider string) error {
 	return fmt.Errorf("%s", hint)
 }
 
-// DetectProviders 扫描本机已安装的 Provider（含 stub）；诊断与 Daemon 自动同步共用探测逻辑。
+// DetectProviders 扫描本机已安装的 Provider（含 stub）。
 func DetectProviders() []string {
 	return append([]string{"stub"}, InstalledBuiltins()...)
 }
