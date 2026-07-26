@@ -6,7 +6,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import { getHostBridge } from '@/lib/hostBridge'
-import { clearRememberedAuth } from '@/lib/rememberAuth'
 import { clearSession, getSessionEmail } from '@/lib/session'
 
 type NavItem = {
@@ -114,6 +113,7 @@ async function logout() {
   } catch {
     /* ignore */
   }
+  // 只清会话，保留本机账号登录记录
   clearSession()
   await router.replace({ name: 'login' })
 }
@@ -125,8 +125,8 @@ async function switchAccount() {
   } catch {
     /* ignore */
   }
+  // 切换账号同样保留历史记录，登录页可用下拉选择其它账号
   clearSession()
-  clearRememberedAuth()
   await router.replace({ name: 'login', query: { switch: '1' } })
 }
 
