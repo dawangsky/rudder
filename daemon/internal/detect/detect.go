@@ -14,9 +14,35 @@ var ProviderBins = map[string][]string{
 	"codex":       {"codex"},
 }
 
-// AllowedProviders 可手动添加的 Provider 列表。
+// BuiltinProviders 内置 Provider：Daemon 轮询时自动探测，本机已安装则会注册/恢复。
+func BuiltinProviders() []string {
+	return []string{"cursor", "claude_code", "codex"}
+}
+
+// AllowedProviders 可注册的 Provider 列表（含 stub / 自定义手动项）。
 func AllowedProviders() []string {
 	return []string{"stub", "cursor", "claude_code", "codex"}
+}
+
+// IsBuiltin 是否为自动探测的内置 Provider。
+func IsBuiltin(provider string) bool {
+	for _, p := range BuiltinProviders() {
+		if p == provider {
+			return true
+		}
+	}
+	return false
+}
+
+// InstalledBuiltins 返回本机已安装的内置 Provider（不含 stub）。
+func InstalledBuiltins() []string {
+	var found []string
+	for _, p := range BuiltinProviders() {
+		if IsInstalled(p) {
+			found = append(found, p)
+		}
+	}
+	return found
 }
 
 // IsAllowed 是否为已知 Provider。
@@ -51,16 +77,14 @@ func RequireInstalled(provider string) error {
 		return nil
 	}
 	bins := ProviderBins[provider]
-	return fmt.Errorf("本机未安装 %s，无法注册。请先安装并将其加入 PATH（查找命令: %s）", provider, strings.Join(bins, " / "))
+	hint := fmt.Sprintf("本机未安装 %s，无法注册。请先安装并将其加入 PATH（查找命令: %s）", provider, strings.Join(bins, " / "))
+	if provider == "claude_code" {
+		hint += "。若已 npm i -g @anthropic-ai/claude-code，请确认 ~/.npm-global/bin/claude 可执行（which claude）"
+	}
+	return fmt.Errorf("%s", hint)
 }
 
-// DetectProviders 扫描本机已安装的 Provider（含 stub）；仅用于诊断，不再在 Daemon 启动时全量注册。
+// DetectProviders 扫描本机已安装的 Provider（含 stub）；诊断与 Daemon 自动同步共用探测逻辑。
 func DetectProviders() []string {
-	found := []string{"stub"}
-	for _, p := range []string{"cursor", "claude_code", "codex"} {
-		if IsInstalled(p) {
-			found = append(found, p)
-		}
-	}
-	return found
+	return append([]string{"stub"}, InstalledBuiltins()...)
 }

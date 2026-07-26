@@ -6,6 +6,8 @@ import IssuesView from '../views/IssuesView.vue'
 import AgentsView from '../views/AgentsView.vue'
 import SkillsView from '../views/SkillsView.vue'
 import RuntimesView from '../views/RuntimesView.vue'
+import RuntimeMachineView from '../views/RuntimeMachineView.vue'
+import RuntimeDetailView from '../views/RuntimeDetailView.vue'
 import InboxView from '../views/InboxView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
@@ -29,6 +31,8 @@ export const router = createRouter({
         { path: 'agents', name: 'agents', component: AgentsView },
         { path: 'skills', name: 'skills', component: SkillsView },
         { path: 'runtimes', name: 'runtimes', component: RuntimesView },
+        { path: 'runtimes/machines/:daemonId', name: 'runtime-machine', component: RuntimeMachineView },
+        { path: 'runtimes/:runtimeId', name: 'runtime-detail', component: RuntimeDetailView },
         { path: 'inbox', name: 'inbox', component: InboxView },
         { path: 'settings', redirect: '/settings/daemon' },
         { path: 'settings/:section', name: 'settings', component: SettingsView },

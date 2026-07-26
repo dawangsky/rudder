@@ -7,7 +7,7 @@ import (
 	"sort"
 )
 
-// EnabledProvidersPath 本机已「手动添加」的 Provider 列表（非自动探测全量）。
+// EnabledProvidersPath 本机启用列表：内置项可由 Daemon 探测自动写入；stub 等须手动 add。
 func EnabledProvidersPath() (string, error) {
 	dir, err := RudderHome()
 	if err != nil {

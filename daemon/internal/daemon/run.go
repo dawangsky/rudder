@@ -13,8 +13,7 @@ import (
 	"github.com/dawangsky/rudder/daemon/internal/provider"
 )
 
-// Run 常驻循环：仅为「已手动添加」的 Provider 注册 Runtime、心跳、领任务。
-// 不再自动探测全量 CLI 并注册——本机装了也不展示，除非用户先添加。
+// Run 常驻循环：内置 Provider 按本机安装自动探测注册；stub 等手动项走启用列表；心跳与领任务。
 func Run(serverOverride string) error {
 	creds, err := config.LoadCredentials()
 	if err != nil {
@@ -32,35 +31,20 @@ func Run(serverOverride string) error {
 	host, _ := os.Hostname()
 	meta := fmt.Sprintf(`{"profile":%q,"email":%q}`, config.ProfileName(), creds.Email)
 
-	enabled, err := config.LoadEnabledProviders()
-	if err != nil {
-		return err
-	}
-	if len(enabled) == 0 {
-		fmt.Println("尚未添加任何运行时。请在 Desktop「运行时」页添加，或执行: rudder runtime add --provider cursor")
-	}
-
 	fmt.Printf("daemon profile=%s instance=%s email=%s\n", config.ProfileName(), daemonID, creds.Email)
 
 	runtimeIDs := map[string]string{}
-	for _, p := range enabled {
-		if err := detect.RequireInstalled(p); err != nil {
-			fmt.Printf("skip provider=%s: %v\n", p, err)
-			continue
-		}
-		rt, err := api.RegisterRuntime(daemonID, p, host, meta)
-		if err != nil {
-			return fmt.Errorf("register runtime %s: %w", p, err)
-		}
-		runtimeIDs[p] = fmt.Sprint(rt["id"])
-		fmt.Printf("registered runtime provider=%s id=%s\n", p, runtimeIDs[p])
+	syncProviders(api, daemonID, host, meta, runtimeIDs)
+
+	if len(runtimeIDs) == 0 {
+		fmt.Println("尚未发现可注册运行时。安装 Cursor / Claude Code / Codex 后约 10 秒内自动出现；也可 rudder runtime add --provider stub")
 	}
 
 	pidPath, _ := config.PidPath()
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600)
 	defer os.Remove(pidPath)
 
-	fmt.Println("daemon running; poll=3s heartbeat=15s; Ctrl+C to stop")
+	fmt.Println("daemon running; poll=3s heartbeat=15s detect=10s; Ctrl+C to stop")
 	tickPoll := time.NewTicker(3 * time.Second)
 	tickHB := time.NewTicker(15 * time.Second)
 	tickSync := time.NewTicker(10 * time.Second)
@@ -75,8 +59,8 @@ func Run(serverOverride string) error {
 				_ = api.Heartbeat(id)
 			}
 		case <-tickSync.C:
-			// 热加载本机已添加列表（UI/CLI 新增后无需重启 Daemon）
-			syncEnabled(api, daemonID, host, meta, runtimeIDs)
+			// 热同步：探测本机已安装内置 Provider + 手动启用列表
+			syncProviders(api, daemonID, host, meta, runtimeIDs)
 		case <-tickPoll.C:
 			for prov, id := range runtimeIDs {
 				claim, err := api.Claim(id)
@@ -89,13 +73,47 @@ func Run(serverOverride string) error {
 	}
 }
 
-func syncEnabled(api *client.API, daemonID, host, meta string, runtimeIDs map[string]string) {
+// resolveWantProviders 合并：已安装内置（自动）+ enabled 中仍可用的项（stub / 手动）。
+func resolveWantProviders() ([]string, error) {
 	enabled, err := config.LoadEnabledProviders()
+	if err != nil {
+		return nil, err
+	}
+	wantSet := map[string]bool{}
+	var want []string
+
+	add := func(p string) {
+		if wantSet[p] {
+			return
+		}
+		wantSet[p] = true
+		want = append(want, p)
+	}
+
+	for _, p := range detect.InstalledBuiltins() {
+		add(p)
+		// 写回启用列表，便于 CLI list / 删除后再被探测恢复时状态一致
+		_ = config.AddEnabledProvider(p)
+	}
+	for _, p := range enabled {
+		if detect.IsBuiltin(p) {
+			// 内置以探测为准：未安装则不保留在 want（会从服务端注销）
+			continue
+		}
+		if p == "stub" || detect.IsInstalled(p) {
+			add(p)
+		}
+	}
+	return want, nil
+}
+
+func syncProviders(api *client.API, daemonID, host, meta string, runtimeIDs map[string]string) {
+	wantList, err := resolveWantProviders()
 	if err != nil {
 		return
 	}
 	want := map[string]bool{}
-	for _, p := range enabled {
+	for _, p := range wantList {
 		want[p] = true
 		if _, ok := runtimeIDs[p]; ok {
 			continue
