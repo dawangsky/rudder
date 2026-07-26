@@ -14,6 +14,42 @@ type Result struct {
 	Err     error
 }
 
+// RunCommandLine 执行自定义启动命令；支持 {prompt} 占位，否则将 prompt 作为末尾参数追加。
+func RunCommandLine(cmdline, workDir, prompt, instructions string) Result {
+	cmdline = strings.TrimSpace(cmdline)
+	if cmdline == "" {
+		return Result{Err: fmt.Errorf("自定义命令为空")}
+	}
+	expanded := cmdline
+	if strings.Contains(cmdline, "{prompt}") {
+		expanded = strings.ReplaceAll(cmdline, "{prompt}", shellQuote(prompt))
+	} else {
+		expanded = cmdline + " " + shellQuote(prompt)
+	}
+	cmd := exec.Command("sh", "-c", expanded)
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(),
+		"RUDDER_PROMPT="+prompt,
+		"RUDDER_INSTRUCTIONS="+instructions,
+	)
+	out, err := cmd.CombinedOutput()
+	summary := string(out)
+	if len(summary) > 4000 {
+		summary = summary[:4000] + "…"
+	}
+	if err != nil {
+		return Result{Summary: summary, Err: fmt.Errorf("%v: %s", err, summary)}
+	}
+	return Result{Summary: strings.TrimSpace(summary), Err: nil}
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
 // Run 按 provider 执行；找不到真实 CLI 时回退 stub，保证端到端可冒烟。
 func Run(provider, workDir, prompt, instructions string) Result {
 	switch provider {

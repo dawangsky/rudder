@@ -259,6 +259,29 @@ ipcMain.handle('runtime:remove', async (_evt, provider) => {
   return { ok: r.code === 0, message }
 })
 
+ipcMain.handle('runtime:validate-command', async (_evt, command) => {
+  const r = await runCli(['runtime', 'validate-command', '--command', String(command || '')])
+  const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '命令无效')
+  return { ok: r.code === 0, message }
+})
+
+ipcMain.handle('runtime:add-custom', async (_evt, payload) => {
+  const base = String(payload?.base || '')
+  const name = String(payload?.name || '')
+  const command = String(payload?.command || '')
+  const description = String(payload?.description || '')
+  const args = [
+    'runtime', 'add-custom',
+    '--base', base,
+    '--name', name,
+    '--command', command,
+  ]
+  if (description) args.push('--description', description)
+  const r = await runCli(args)
+  const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '创建失败')
+  return { ok: r.code === 0, message }
+})
+
 app.whenReady().then(async () => {
   createWindow()
   const prefs = readPrefs()

@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld('rudderHost', {
   enableRuntime: (provider) => ipcRenderer.invoke('runtime:enable', provider),
   addRuntime: (provider) => ipcRenderer.invoke('runtime:add', provider),
   removeRuntime: (provider) => ipcRenderer.invoke('runtime:remove', provider),
+  validateCommand: (command) => ipcRenderer.invoke('runtime:validate-command', command),
+  addCustomRuntime: (payload) => ipcRenderer.invoke('runtime:add-custom', payload),
 })

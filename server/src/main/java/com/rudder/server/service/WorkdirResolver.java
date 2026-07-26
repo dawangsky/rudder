@@ -2,6 +2,7 @@ package com.rudder.server.service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -75,6 +76,36 @@ public final class WorkdirResolver {
             return false;
         }
         String p = provider.toLowerCase(Locale.ROOT);
-        return Set.of("cursor", "claude_code", "codex", "stub").contains(p);
+        if (Set.of("cursor", "claude_code", "codex", "stub").contains(p)) {
+            return true;
+        }
+        // 自定义运行时：custom_<base>_<hash8>
+        if (p.startsWith("custom_")) {
+            String rest = p.substring("custom_".length());
+            for (String base : List.of("claude_code", "cursor", "codex", "stub")) {
+                if (rest.startsWith(base + "_")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 自定义运行时解析基础协议；内置原样返回。 */
+    public static String baseProvider(String provider) {
+        if (provider == null) {
+            return "";
+        }
+        String p = provider.toLowerCase(Locale.ROOT);
+        if (!p.startsWith("custom_")) {
+            return p;
+        }
+        String rest = p.substring("custom_".length());
+        for (String base : List.of("claude_code", "cursor", "codex", "stub")) {
+            if (rest.startsWith(base + "_")) {
+                return base;
+            }
+        }
+        return p;
     }
 }

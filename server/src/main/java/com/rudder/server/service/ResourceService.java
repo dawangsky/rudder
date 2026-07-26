@@ -52,7 +52,7 @@ public class ResourceService {
     public Map<String, Object> createAgent(AuthPrincipal p, Map<String, Object> body) {
         String provider = str(body.get("provider"));
         if (!WorkdirResolver.isAllowedProvider(provider)) {
-            throw new IllegalArgumentException("不支持的 Provider，请选择 cursor / claude_code / codex / stub");
+            throw new IllegalArgumentException("不支持的 Provider（含自定义 custom_*）");
         }
         AgentEntity a = new AgentEntity();
         a.setWorkspaceId(p.workspaceId());
@@ -61,19 +61,21 @@ public class ResourceService {
         a.setDescription(str(body.get("description")));
         a.setInstructions(str(body.get("instructions")));
         a.setProvider(provider.toLowerCase());
-        // 须先有对应 Provider 的在线 Runtime（自动探测或手动添加）
+        // 须先有对应 Provider 的在线 Runtime（内置探测或自定义命令）
         var runtimes = listRuntimes(p);
-        Long bindRuntimeId = asLong(body.get("runtimeId"));
+        final Long requestedRuntimeId = asLong(body.get("runtimeId"));
         boolean runtimeOnline = runtimes.stream().anyMatch(r -> {
-            if (!provider.equalsIgnoreCase(String.valueOf(r.get("provider")))) return false;
             if (!"online".equals(String.valueOf(r.get("status")))) return false;
-            if (bindRuntimeId == null) return true;
-            return String.valueOf(bindRuntimeId).equals(String.valueOf(r.get("id")));
+            if (requestedRuntimeId != null) {
+                return String.valueOf(requestedRuntimeId).equals(String.valueOf(r.get("id")));
+            }
+            return provider.equalsIgnoreCase(String.valueOf(r.get("provider")));
         });
         if (!runtimeOnline) {
             throw new IllegalArgumentException(
                     "运行时「" + provider + "」未添加或不在线。请先到「运行时」页确认本机已安装并在线");
         }
+        Long bindRuntimeId = requestedRuntimeId;
         if (bindRuntimeId == null) {
             bindRuntimeId = runtimes.stream()
                     .filter(r -> provider.equalsIgnoreCase(String.valueOf(r.get("provider")))
@@ -357,20 +359,36 @@ public class ResourceService {
         }
         m.put("status", status);
         m.put("lastHeartbeatAt", r.getLastHeartbeatAt() == null ? null : r.getLastHeartbeatAt().toString());
-        // 从 meta 提取 profile，便于 UI 区分 Desktop/CLI
         String profile = "";
-        if (StringUtils.hasText(r.getMetaJson()) && r.getMetaJson().contains("profile")) {
+        String kind = "builtin";
+        String displayName = "";
+        String command = "";
+        String description = "";
+        String baseProvider = WorkdirResolver.baseProvider(r.getProvider());
+        if (StringUtils.hasText(r.getMetaJson())) {
             try {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> meta = new com.fasterxml.jackson.databind.ObjectMapper()
                         .readValue(r.getMetaJson(), Map.class);
-                Object pv = meta.get("profile");
-                if (pv != null) profile = String.valueOf(pv);
+                if (meta.get("profile") != null) profile = String.valueOf(meta.get("profile"));
+                if (meta.get("kind") != null) kind = String.valueOf(meta.get("kind"));
+                if (meta.get("displayName") != null) displayName = String.valueOf(meta.get("displayName"));
+                if (meta.get("command") != null) command = String.valueOf(meta.get("command"));
+                if (meta.get("description") != null) description = String.valueOf(meta.get("description"));
+                if (meta.get("baseProvider") != null) baseProvider = String.valueOf(meta.get("baseProvider"));
             } catch (Exception ignored) {
                 /* ignore */
             }
         }
+        if (r.getProvider() != null && r.getProvider().startsWith("custom_")) {
+            kind = "custom";
+        }
         m.put("profile", profile);
+        m.put("kind", kind);
+        m.put("displayName", displayName);
+        m.put("command", command);
+        m.put("description", description);
+        m.put("baseProvider", baseProvider);
         return m;
     }
 

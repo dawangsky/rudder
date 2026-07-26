@@ -8,6 +8,11 @@ export type Runtime = {
   lastHeartbeatAt?: string
   profile?: string
   daemonId?: string
+  kind?: string
+  displayName?: string
+  command?: string
+  description?: string
+  baseProvider?: string
 }
 
 export type MachineGroup = {
@@ -36,16 +41,36 @@ export const PROVIDERS = [
   { value: 'stub', label: 'Stub', short: 'Stub' },
 ] as const
 
-export function providerMeta(code: string) {
-  return PROVIDERS.find((p) => p.value === code) || { value: code, label: code, short: code }
+export function baseProviderOf(provider: string) {
+  if (!provider?.startsWith('custom_')) return provider
+  const rest = provider.slice('custom_'.length)
+  for (const base of ['claude_code', 'cursor', 'codex', 'stub']) {
+    if (rest.startsWith(`${base}_`)) return base
+  }
+  return provider
 }
 
-export function displayName(r: Pick<Runtime, 'provider'>) {
+export function providerMeta(code: string) {
+  const base = baseProviderOf(code)
+  return PROVIDERS.find((p) => p.value === base) || { value: code, label: code, short: code }
+}
+
+export function displayName(r: Pick<Runtime, 'provider' | 'displayName'>) {
+  if (r.displayName) return r.displayName
   return providerMeta(r.provider).short
 }
 
-export function providerLabel(r: Pick<Runtime, 'provider'>) {
+export function providerLabel(r: Pick<Runtime, 'provider' | 'displayName'>) {
+  if (r.displayName) return r.displayName
   return providerMeta(r.provider).label
+}
+
+export function isCustomRuntime(r: Pick<Runtime, 'provider' | 'kind'>) {
+  return r.kind === 'custom' || r.provider?.startsWith('custom_')
+}
+
+export function iconProvider(r: Pick<Runtime, 'provider' | 'baseProvider'>) {
+  return r.baseProvider || baseProviderOf(r.provider)
 }
 
 export function formatHeartbeat(iso?: string) {

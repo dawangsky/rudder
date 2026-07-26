@@ -6,7 +6,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import ProviderIcon from '@/components/ProviderIcon.vue'
-import { PROVIDERS, displayName, type Runtime } from '@/lib/runtimes'
+import { PROVIDERS, baseProviderOf, displayName, type Runtime } from '@/lib/runtimes'
 
 const route = useRoute()
 const router = useRouter()
@@ -88,12 +88,15 @@ async function create() {
   }
   saving.value = true
   try {
+    // 若选了具体 runtime（含自定义），以该 runtime 的 provider 为准
+    const rt = runtimeOptions.value.find((r) => r.id === form.value.runtimeId)
+    const provider = rt?.provider || form.value.provider
     await apiFetch('/api/agents', {
       method: 'POST',
       body: JSON.stringify({
         name: form.value.name.trim(),
         description: form.value.description.trim(),
-        provider: form.value.provider,
+        provider,
         runtimeId: form.value.runtimeId || undefined,
         instructions: form.value.instructions,
         skillIds: form.value.skillIds,
@@ -195,7 +198,8 @@ onMounted(load)
         <select v-model="form.runtimeId" :disabled="!runtimeOptions.length">
           <option disabled value="">请选择在线运行时</option>
           <option v-for="r in runtimeOptions" :key="r.id" :value="r.id">
-            {{ displayName(r) }} ({{ r.hostName || r.daemonId || r.id }})
+            {{ displayName(r) }}{{ r.kind === 'custom' || r.provider.startsWith('custom_') ? ' · 自定义' : '' }}
+            ({{ r.hostName || r.daemonId || r.id }})
           </option>
         </select>
       </label>

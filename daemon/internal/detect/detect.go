@@ -45,10 +45,31 @@ func InstalledBuiltins() []string {
 	return found
 }
 
-// IsAllowed 是否为已知 Provider。
+// IsAllowed 是否为已知 Provider（含 custom_<base>_<hash>）。
 func IsAllowed(provider string) bool {
-	_, ok := ProviderBins[provider]
-	return ok
+	if _, ok := ProviderBins[provider]; ok {
+		return true
+	}
+	return IsCustomProviderKey(provider)
+}
+
+// IsCustomProviderKey 自定义运行时 key：custom_<base>_<hash8>
+func IsCustomProviderKey(provider string) bool {
+	return strings.HasPrefix(provider, "custom_")
+}
+
+// BaseProvider 解析执行用的基础协议（自定义项回到 cursor/claude_code/codex）。
+func BaseProvider(provider string) string {
+	if !IsCustomProviderKey(provider) {
+		return provider
+	}
+	rest := strings.TrimPrefix(provider, "custom_")
+	for _, base := range []string{"claude_code", "cursor", "codex", "stub"} {
+		if strings.HasPrefix(rest, base+"_") {
+			return base
+		}
+	}
+	return provider
 }
 
 // IsInstalled 探测本机是否已安装该 Provider（stub 恒为 true）。
@@ -70,6 +91,13 @@ func IsInstalled(provider string) bool {
 
 // RequireInstalled 未安装则返回可读错误（用于「添加运行时」注册失败提示）。
 func RequireInstalled(provider string) error {
+	if IsCustomProviderKey(provider) {
+		base := BaseProvider(provider)
+		if !IsBuiltin(base) && base != "stub" {
+			return fmt.Errorf("不支持的自定义基础协议: %s", base)
+		}
+		return nil
+	}
 	if !IsAllowed(provider) {
 		return fmt.Errorf("不支持的 Provider: %s（可选: %s）", provider, strings.Join(AllowedProviders(), ", "))
 	}

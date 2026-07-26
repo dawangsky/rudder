@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/dawangsky/rudder/daemon/internal/client"
 	"github.com/dawangsky/rudder/daemon/internal/config"
@@ -13,7 +15,7 @@ import (
 func newRuntimeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "runtime",
-		Short: "手动添加/移除本机运行时（须先探测已安装再注册）",
+		Short: "内置探测 + 自定义命令运行时（名称/命令必填并校验）",
 	}
 
 	var addProvider string
@@ -62,7 +64,9 @@ func newRuntimeCmd() *cobra.Command {
 			if removeProvider == "" {
 				return fmt.Errorf("请指定 --provider")
 			}
-			if err := config.RemoveEnabledProvider(removeProvider); err != nil {
+			if detect.IsCustomProviderKey(removeProvider) {
+				_ = config.RemoveCustomRuntime(removeProvider)
+			} else if err := config.RemoveEnabledProvider(removeProvider); err != nil {
 				return err
 			}
 			api, err := daemonAPI()
@@ -91,7 +95,11 @@ func newRuntimeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(enabled) == 0 {
+			customs, err := config.LoadCustomRuntimes()
+			if err != nil {
+				return err
+			}
+			if len(enabled) == 0 && len(customs) == 0 {
 				fmt.Println("(空) 尚未添加运行时")
 				return nil
 			}
@@ -102,9 +110,103 @@ func newRuntimeCmd() *cobra.Command {
 				}
 				fmt.Printf("- %s\t%s\n", p, status)
 			}
+			for _, c := range customs {
+				status := "ok"
+				if err := detect.ValidateCommand(c.Command); err != nil {
+					status = "INVALID: " + err.Error()
+				}
+				fmt.Printf("- %s\t%s\t%s\t%q\n", c.ProviderKey, c.Name, status, c.Command)
+			}
 			return nil
 		},
 	}
+
+	var (
+		customBase string
+		customName string
+		customCmd  string
+		customDesc string
+	)
+	addCustom := &cobra.Command{
+		Use:          "add-custom",
+		Short:        "添加自定义运行时：须指定基础协议、显示名称与启动命令，并校验命令有效",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			customBase = strings.TrimSpace(customBase)
+			customName = strings.TrimSpace(customName)
+			customCmd = strings.TrimSpace(customCmd)
+			if customBase == "" || !detect.IsBuiltin(customBase) {
+				return fmt.Errorf("--base 须为 cursor / claude_code / codex")
+			}
+			if customName == "" {
+				return fmt.Errorf("--name 不能为空")
+			}
+			if customCmd == "" {
+				return fmt.Errorf("--command 不能为空")
+			}
+			if err := detect.ValidateCommand(customCmd); err != nil {
+				return err
+			}
+			key := config.MakeCustomProviderKey(customBase, customName, customCmd)
+			item := config.CustomRuntime{
+				ProviderKey:  key,
+				BaseProvider: customBase,
+				Name:         customName,
+				Command:      customCmd,
+				Description:  strings.TrimSpace(customDesc),
+			}
+			if err := config.AddCustomRuntime(item); err != nil {
+				return err
+			}
+			api, err := daemonAPI()
+			if err != nil {
+				return err
+			}
+			daemonID, err := config.LoadOrCreateInstanceID()
+			if err != nil {
+				return err
+			}
+			host, _ := os.Hostname()
+			metaMap := map[string]any{
+				"profile":      config.ProfileName(),
+				"kind":         "custom",
+				"baseProvider": customBase,
+				"displayName":  customName,
+				"command":      customCmd,
+				"description":  item.Description,
+			}
+			metaBytes, _ := json.Marshal(metaMap)
+			rt, err := api.RegisterRuntime(daemonID, key, host, string(metaBytes))
+			if err != nil {
+				return fmt.Errorf("注册失败: %w", err)
+			}
+			fmt.Printf("ok provider=%s id=%s name=%s\n", key, rt["id"], customName)
+			return nil
+		},
+	}
+	addCustom.Flags().StringVar(&customBase, "base", "", "基础协议：cursor | claude_code | codex")
+	addCustom.Flags().StringVar(&customName, "name", "", "显示名称（必填）")
+	addCustom.Flags().StringVar(&customCmd, "command", "", "启动命令（必填，须本机可执行）")
+	addCustom.Flags().StringVar(&customDesc, "description", "", "描述（可选）")
+	_ = addCustom.MarkFlagRequired("base")
+	_ = addCustom.MarkFlagRequired("name")
+	_ = addCustom.MarkFlagRequired("command")
+
+	var validateCmdLine string
+	validateCmd := &cobra.Command{
+		Use:          "validate-command",
+		Short:        "仅校验命令是否可在本机找到（不注册）",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := detect.ValidateCommand(validateCmdLine); err != nil {
+				return err
+			}
+			fmt.Println("ok command valid")
+			return nil
+		},
+	}
+	validateCmd.Flags().StringVar(&validateCmdLine, "command", "", "要校验的命令行")
+	_ = validateCmd.MarkFlagRequired("command")
 
 	var detectProvider string
 	detectCmd := &cobra.Command{
@@ -147,7 +249,7 @@ func newRuntimeCmd() *cobra.Command {
 	enableCmd.Flags().StringVar(&enableProvider, "provider", "", "cursor | claude_code | codex | stub")
 	_ = enableCmd.MarkFlagRequired("provider")
 
-	cmd.AddCommand(add, remove, list, detectCmd, enableCmd)
+	cmd.AddCommand(add, remove, list, detectCmd, enableCmd, addCustom, validateCmd)
 	return cmd
 }
 

@@ -400,15 +400,16 @@ public class OrchestrationService {
         AgentEntity agent = resourceService.requireAgent(
                 new AuthPrincipal(daemon.userId(), daemon.email(), "session", daemon.workspaceId()),
                 task.getAgentId());
-        // stub runtime 可领取任意 provider 的任务（本机无真实 CLI 时的冒烟路径）
-        if (!"stub".equals(runtime.getProvider())
-                && !agent.getProvider().equals(runtime.getProvider())
-                && task.getRuntimeId() == null) {
+        // 已绑定其它 runtime 的任务不领；未绑定则要求 provider 匹配（stub 例外）
+        if (task.getRuntimeId() != null && !Objects.equals(task.getRuntimeId(), runtimeId)) {
             return Map.of("task", (Object) null);
         }
-        if (!"stub".equals(runtime.getProvider())
-                && task.getRuntimeId() != null
-                && !agent.getProvider().equals(runtime.getProvider())) {
+        boolean providerMatch = agent.getProvider().equals(runtime.getProvider())
+                || WorkdirResolver.baseProvider(agent.getProvider())
+                        .equals(WorkdirResolver.baseProvider(runtime.getProvider()));
+        if (task.getRuntimeId() == null
+                && !"stub".equals(runtime.getProvider())
+                && !providerMatch) {
             return Map.of("task", (Object) null);
         }
         task.setRuntimeId(runtimeId);
@@ -440,6 +441,22 @@ public class OrchestrationService {
         payload.put("envRoot", WorkdirResolver.sandboxEnvRoot(task.getWorkspaceId(), task.getId()));
         payload.put("skills", skills.stream().map(s -> Map.of("name", s.getName(), "content", s.getContent())).toList());
         payload.put("localPathMode", project != null && StringUtils.hasText(project.getLocalPath()));
+        // 自定义运行时命令（供 Daemon 直接 exec）
+        if (StringUtils.hasText(runtime.getMetaJson()) && runtime.getMetaJson().contains("command")) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> meta = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(runtime.getMetaJson(), Map.class);
+                if (meta.get("command") != null) {
+                    payload.put("command", String.valueOf(meta.get("command")));
+                }
+                if (meta.get("baseProvider") != null) {
+                    payload.put("baseProvider", String.valueOf(meta.get("baseProvider")));
+                }
+            } catch (Exception ignored) {
+                /* ignore */
+            }
+        }
         return payload;
     }
 

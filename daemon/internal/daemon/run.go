@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 	"github.com/dawangsky/rudder/daemon/internal/provider"
 )
 
-// Run 常驻循环：内置 Provider 按本机安装自动探测注册；stub 等手动项走启用列表；心跳与领任务。
+// Run 常驻循环：内置自动探测 + 自定义命令运行时心跳领任务。
 func Run(serverOverride string) error {
 	creds, err := config.LoadCredentials()
 	if err != nil {
@@ -29,15 +30,15 @@ func Run(serverOverride string) error {
 		return err
 	}
 	host, _ := os.Hostname()
-	meta := fmt.Sprintf(`{"profile":%q,"email":%q}`, config.ProfileName(), creds.Email)
 
 	fmt.Printf("daemon profile=%s instance=%s email=%s\n", config.ProfileName(), daemonID, creds.Email)
 
 	runtimeIDs := map[string]string{}
-	syncProviders(api, daemonID, host, meta, runtimeIDs)
+	customCmds := map[string]string{}
+	syncProviders(api, daemonID, host, creds.Email, runtimeIDs, customCmds)
 
 	if len(runtimeIDs) == 0 {
-		fmt.Println("尚未发现可注册运行时。安装 Cursor / Claude Code / Codex 后约 10 秒内自动出现；也可 rudder runtime add --provider stub")
+		fmt.Println("尚未发现可注册运行时。安装 Cursor / Claude Code / Codex 后约 10 秒内自动出现；也可添加自定义运行时")
 	}
 
 	pidPath, _ := config.PidPath()
@@ -59,68 +60,78 @@ func Run(serverOverride string) error {
 				_ = api.Heartbeat(id)
 			}
 		case <-tickSync.C:
-			// 热同步：探测本机已安装内置 Provider + 手动启用列表
-			syncProviders(api, daemonID, host, meta, runtimeIDs)
+			syncProviders(api, daemonID, host, creds.Email, runtimeIDs, customCmds)
 		case <-tickPoll.C:
 			for prov, id := range runtimeIDs {
 				claim, err := api.Claim(id)
 				if err != nil || claim["task"] == nil {
 					continue
 				}
-				go handleClaim(api, prov, claim)
+				go handleClaim(api, prov, claim, customCmds[prov])
 			}
 		}
 	}
 }
 
-// resolveWantProviders 合并：已安装内置（自动）+ enabled 中仍可用的项（stub / 手动）。
-func resolveWantProviders() ([]string, error) {
-	enabled, err := config.LoadEnabledProviders()
-	if err != nil {
-		return nil, err
-	}
-	wantSet := map[string]bool{}
-	var want []string
-
-	add := func(p string) {
-		if wantSet[p] {
-			return
-		}
-		wantSet[p] = true
-		want = append(want, p)
-	}
+func syncProviders(
+	api *client.API,
+	daemonID, host, email string,
+	runtimeIDs map[string]string,
+	customCmds map[string]string,
+) {
+	wantMeta := map[string]string{}
 
 	for _, p := range detect.InstalledBuiltins() {
-		add(p)
-		// 写回启用列表，便于 CLI list / 删除后再被探测恢复时状态一致
 		_ = config.AddEnabledProvider(p)
+		meta, _ := json.Marshal(map[string]any{
+			"profile": config.ProfileName(),
+			"email":   email,
+			"kind":    "builtin",
+		})
+		wantMeta[p] = string(meta)
 	}
+	enabled, _ := config.LoadEnabledProviders()
 	for _, p := range enabled {
 		if detect.IsBuiltin(p) {
-			// 内置以探测为准：未安装则不保留在 want（会从服务端注销）
 			continue
 		}
-		if p == "stub" || detect.IsInstalled(p) {
-			add(p)
+		if p == "stub" {
+			meta, _ := json.Marshal(map[string]any{
+				"profile": config.ProfileName(),
+				"email":   email,
+				"kind":    "stub",
+			})
+			wantMeta[p] = string(meta)
 		}
 	}
-	return want, nil
-}
-
-func syncProviders(api *client.API, daemonID, host, meta string, runtimeIDs map[string]string) {
-	wantList, err := resolveWantProviders()
-	if err != nil {
-		return
+	customs, _ := config.LoadCustomRuntimes()
+	for _, c := range customs {
+		if err := detect.ValidateCommand(c.Command); err != nil {
+			fmt.Printf("skip custom=%s: %v\n", c.ProviderKey, err)
+			continue
+		}
+		meta, _ := json.Marshal(map[string]any{
+			"profile":      config.ProfileName(),
+			"email":        email,
+			"kind":         "custom",
+			"baseProvider": c.BaseProvider,
+			"displayName":  c.Name,
+			"command":      c.Command,
+			"description":  c.Description,
+		})
+		wantMeta[c.ProviderKey] = string(meta)
+		customCmds[c.ProviderKey] = c.Command
 	}
-	want := map[string]bool{}
-	for _, p := range wantList {
-		want[p] = true
+
+	for p, meta := range wantMeta {
 		if _, ok := runtimeIDs[p]; ok {
 			continue
 		}
-		if err := detect.RequireInstalled(p); err != nil {
-			fmt.Printf("skip provider=%s: %v\n", p, err)
-			continue
+		if !detect.IsCustomProviderKey(p) {
+			if err := detect.RequireInstalled(p); err != nil {
+				fmt.Printf("skip provider=%s: %v\n", p, err)
+				continue
+			}
 		}
 		rt, err := api.RegisterRuntime(daemonID, p, host, meta)
 		if err != nil {
@@ -131,15 +142,16 @@ func syncProviders(api *client.API, daemonID, host, meta string, runtimeIDs map[
 		fmt.Printf("registered runtime provider=%s id=%s\n", p, runtimeIDs[p])
 	}
 	for p := range runtimeIDs {
-		if !want[p] {
+		if _, ok := wantMeta[p]; !ok {
 			_ = api.DeleteRuntimeByProvider(daemonID, p)
 			delete(runtimeIDs, p)
+			delete(customCmds, p)
 			fmt.Printf("unregistered runtime provider=%s\n", p)
 		}
 	}
 }
 
-func handleClaim(api *client.API, providerName string, claim map[string]any) {
+func handleClaim(api *client.API, providerName string, claim map[string]any, customCommand string) {
 	task, _ := claim["task"].(map[string]any)
 	agent, _ := claim["agent"].(map[string]any)
 	if task == nil || agent == nil {
@@ -162,6 +174,9 @@ func handleClaim(api *client.API, providerName string, claim map[string]any) {
 	if agentProvider == "" {
 		agentProvider = providerName
 	}
+	if cmd, ok := claim["command"].(string); ok && cmd != "" {
+		customCommand = cmd
+	}
 
 	unlock := func() {}
 	if localMode {
@@ -175,12 +190,18 @@ func handleClaim(api *client.API, providerName string, claim map[string]any) {
 		return
 	}
 	execenv.AppendLog(envRoot, "start provider="+agentProvider)
-	runProvider := agentProvider
-	res := provider.Run(runProvider, workDir, prompt, instructions)
-	if res.Err != nil && runProvider != "stub" {
-		execenv.AppendLog(envRoot, "provider failed, fallback stub: "+res.Err.Error())
-		_ = api.Report(taskID, map[string]any{"status": "log", "line": "fallback to stub provider"})
-		res = provider.Run("stub", workDir, prompt, instructions)
+
+	var res provider.Result
+	if customCommand != "" {
+		res = provider.RunCommandLine(customCommand, workDir, prompt, instructions)
+	} else {
+		runProvider := detect.BaseProvider(agentProvider)
+		res = provider.Run(runProvider, workDir, prompt, instructions)
+		if res.Err != nil && runProvider != "stub" {
+			execenv.AppendLog(envRoot, "provider failed, fallback stub: "+res.Err.Error())
+			_ = api.Report(taskID, map[string]any{"status": "log", "line": "fallback to stub provider"})
+			res = provider.Run("stub", workDir, prompt, instructions)
+		}
 	}
 	_ = api.Report(taskID, map[string]any{"status": "log", "line": "provider finished"})
 	if res.Err != nil {

@@ -52,6 +52,13 @@ type HostBridgeApi = {
   enableRuntime: (provider: string) => Promise<RuntimeActionResult>
   addRuntime: (provider: string) => Promise<RuntimeActionResult>
   removeRuntime: (provider: string) => Promise<RuntimeActionResult>
+  validateCommand: (command: string) => Promise<RuntimeActionResult>
+  addCustomRuntime: (payload: {
+    base: string
+    name: string
+    command: string
+    description?: string
+  }) => Promise<RuntimeActionResult>
 }
 
 declare global {
@@ -109,6 +116,12 @@ export function getHostBridge(): HostBridgeApi {
     },
     async removeRuntime(provider: string) {
       return unsupported('remove', provider)
+    },
+    async validateCommand() {
+      return { ok: false, message: '非 Desktop：请在目标机用 rudder runtime validate-command' }
+    },
+    async addCustomRuntime() {
+      return { ok: false, message: '非 Desktop：请执行 rudder runtime add-custom' }
     },
   }
 }

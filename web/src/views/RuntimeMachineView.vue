@@ -13,6 +13,8 @@ import {
   displayName,
   formatHeartbeat,
   groupMachines,
+  iconProvider,
+  isCustomRuntime,
   providerLabel,
   type LocalMachineHint,
   type Runtime,
@@ -37,12 +39,14 @@ const machineAlias = ref('')
 const provider = ref('cursor')
 const customName = ref('')
 const customCommand = ref('')
+const customDesc = ref('')
 const adding = ref(false)
+const validating = ref(false)
 const daemonRunning = ref(false)
 const iconTick = ref(0)
 let timer: number | undefined
 
-/** 第 1 步协议卡片：MVP 可点的 + 截图同款即将支持项 */
+/** 第 1 步：选择基础协议（内置仍自动探测；此处用于自定义启动命令） */
 const PROTOCOL_OPTIONS = [
   { value: 'claude_code', label: 'Claude', enabled: true },
   { value: 'codebuddy', label: 'Codebuddy', enabled: false },
@@ -61,7 +65,6 @@ const PROTOCOL_OPTIONS = [
   { value: 'traecli', label: 'Traecli', enabled: false },
   { value: 'grok', label: 'Grok', enabled: false },
   { value: 'qwen', label: 'Qwen', enabled: false },
-  { value: 'stub', label: 'Stub', enabled: true },
 ] as const
 
 const selectedProtocol = computed(
@@ -204,6 +207,7 @@ function openAddCustom() {
   provider.value = 'cursor'
   customName.value = ''
   customCommand.value = ''
+  customDesc.value = ''
   showAddProvider.value = true
 }
 
@@ -216,15 +220,22 @@ function closeAddCustom() {
 function selectProtocol(value: string, enabled: boolean) {
   err.value = ''
   if (!enabled) {
-    err.value = '该协议类型即将支持，MVP 请选择 Claude / Codex / Cursor / Stub'
+    err.value = '该协议类型即将支持，请选择 Claude / Codex / Cursor'
     return
   }
   provider.value = value
-  const meta = PROTOCOL_OPTIONS.find((p) => p.value === value)
-  customName.value = meta?.label || value
+  customName.value = ''
   customCommand.value = ''
+  customDesc.value = ''
   addStep.value = 2
 }
+
+const commandPlaceholder = computed(() => {
+  if (provider.value === 'cursor') return '例如：agent --model composer-2.5…'
+  if (provider.value === 'claude_code') return '例如：claude --model sonnet…'
+  if (provider.value === 'codex') return '例如：codex exec…'
+  return '例如：my-team-cli --flag…'
+})
 
 function backToStep1() {
   err.value = ''
@@ -237,25 +248,47 @@ function openConfigGuide() {
 
 async function addProvider() {
   err.value = ''
+  const name = customName.value.trim()
+  const command = customCommand.value.trim()
+  if (!name) {
+    err.value = '请填写显示名称'
+    return
+  }
+  if (!command) {
+    err.value = '请填写命令'
+    return
+  }
   adding.value = true
+  validating.value = true
   try {
     const host = getHostBridge()
     if (!isLocal.value) {
-      err.value = 'MVP 仅支持在本机 Desktop Daemon 上添加；远程机请在该机执行 rudder runtime add'
+      err.value = 'MVP 仅支持在本机 Desktop Daemon 上添加自定义运行时'
       return
     }
-    const added = await host.addRuntime(provider.value)
+    const valid = await host.validateCommand(command)
+    if (!valid.ok) {
+      err.value = valid.message || '命令无效：本机找不到可执行文件'
+      return
+    }
+    const added = await host.addCustomRuntime({
+      base: provider.value,
+      name,
+      command,
+      description: customDesc.value.trim(),
+    })
     if (!added.ok) {
-      err.value = added.message || '添加失败'
+      err.value = added.message || '创建失败'
       return
     }
     closeAddCustom()
-    okMsg.value = `已添加自定义运行时「${customName.value || selectedProtocol.value.label}」`
+    okMsg.value = `已添加自定义运行时「${name}」`
     await load()
   } catch (e) {
-    err.value = e instanceof Error ? e.message : '添加失败'
+    err.value = e instanceof Error ? e.message : '创建失败'
   } finally {
     adding.value = false
+    validating.value = false
   }
 }
 
@@ -363,7 +396,8 @@ onUnmounted(() => {
       <div>
         <h2>运行时</h2>
         <p class="muted">
-          内置运行时会自动出现。选择一项查看设置，或添加自定义命令。
+          内置运行时（Claude / Codex / Cursor）会按本机安装自动出现。
+          若需团队包装命令、预设模型参数等，请添加自定义运行时。
         </p>
       </div>
       <button type="button" class="btn-dark" @click="openAddCustom">+ 添加自定义运行时</button>
@@ -393,13 +427,15 @@ onUnmounted(() => {
             <td>
               <span class="rt-cell">
                 <ProviderIcon
-                  :provider="r.provider"
+                  :provider="iconProvider(r)"
                   :custom-src="customIconFor(r)"
                   :title="providerLabel(r)"
                   :size="24"
                 />
                 <span class="rt-name">{{ displayName(r) }}</span>
-                <span class="built-in">内置</span>
+                <span class="built-in" :class="{ custom: isCustomRuntime(r) }">
+                  {{ isCustomRuntime(r) ? '自定义' : '内置' }}
+                </span>
               </span>
             </td>
             <td>
@@ -465,27 +501,55 @@ onUnmounted(() => {
 
         <template v-else>
           <p class="step-label">第 2 / 2 步</p>
-          <h4 class="step-title">配置「{{ selectedProtocol.label }}」</h4>
-          <p class="step-hint">确认显示名后创建；添加前会探测本机是否已安装对应 CLI。</p>
+          <h4 class="step-title">配置运行时</h4>
+
+          <div class="field">
+            <span class="label">基础协议类型</span>
+            <div class="base-proto">
+              <ProviderIcon :provider="provider" :size="22" />
+              <strong>{{ selectedProtocol.label }}</strong>
+            </div>
+            <p class="field-hint">创建后无法更改基础协议类型。</p>
+          </div>
+
           <label class="field">
             显示名称
-            <input v-model="customName" type="text" placeholder="例如 Claude" />
+            <input
+              v-model="customName"
+              type="text"
+              placeholder="例如：我的自定义 Claude…"
+              required
+            />
           </label>
           <label class="field">
-            命令（可选）
+            命令
             <input
               v-model="customCommand"
               type="text"
-              placeholder="留空则使用默认探测命令"
+              :placeholder="commandPlaceholder"
+              required
             />
           </label>
-          <p class="step-hint tip">MVP 暂不覆盖自定义命令路径，仍按协议默认二进制探测注册。</p>
+          <label class="field">
+            描述
+            <textarea
+              v-model="customDesc"
+              rows="3"
+              placeholder="描述此运行时的用途（可选）…"
+            />
+          </label>
+
           <p v-if="err" class="error">{{ err }}</p>
-          <div class="modal-actions">
-            <button type="button" class="mini" :disabled="adding" @click="backToStep1">上一步</button>
-            <button type="button" class="btn-dark" :disabled="adding" @click="addProvider">
-              {{ adding ? '创建中…' : '创建' }}
+          <div class="modal-actions step2-actions">
+            <button type="button" class="mini back-btn" :disabled="adding" @click="backToStep1">
+              ‹ 返回
             </button>
+            <div class="right-actions">
+              <button type="button" class="mini" :disabled="adding" @click="closeAddCustom">取消</button>
+              <button type="button" class="btn-dark" :disabled="adding" @click="addProvider">
+                {{ validating ? '校验命令…' : adding ? '创建中…' : '创建运行时' }}
+              </button>
+            </div>
           </div>
         </template>
       </div>
@@ -666,6 +730,38 @@ tr.clickable:hover { background: #fafafa; }
   background: #f3f4f6;
   color: var(--muted);
 }
+.built-in.custom {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.base-proto {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.field .label { font-size: 13px; margin-bottom: 2px; }
+.field textarea {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font: inherit;
+  resize: vertical;
+}
+.step2-actions {
+  justify-content: space-between;
+  align-items: center;
+}
+.right-actions { display: flex; gap: 8px; }
+.back-btn { border: none; background: transparent; color: var(--muted); }
 .health.online { color: #059669; }
 .health.offline { color: #b42318; }
 .empty { text-align: center; color: var(--muted); padding: 28px !important; }
