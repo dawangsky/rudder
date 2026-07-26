@@ -4,14 +4,20 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.rudder.server.auth.AuthPrincipal;
 import com.rudder.server.domain.AgentEntity;
 import com.rudder.server.domain.AgentSkillEntity;
+import com.rudder.server.domain.ChatMessageEntity;
+import com.rudder.server.domain.ChatSessionEntity;
 import com.rudder.server.domain.InboxEntity;
+import com.rudder.server.domain.IssueEntity;
 import com.rudder.server.domain.ProjectEntity;
 import com.rudder.server.domain.RuntimeEntity;
 import com.rudder.server.domain.SkillEntity;
 import com.rudder.server.domain.TaskEntity;
 import com.rudder.server.mapper.AgentMapper;
 import com.rudder.server.mapper.AgentSkillMapper;
+import com.rudder.server.mapper.ChatMessageMapper;
+import com.rudder.server.mapper.ChatSessionMapper;
 import com.rudder.server.mapper.InboxMapper;
+import com.rudder.server.mapper.IssueMapper;
 import com.rudder.server.mapper.ProjectMapper;
 import com.rudder.server.mapper.RuntimeMapper;
 import com.rudder.server.mapper.SkillMapper;
@@ -40,6 +46,9 @@ public class ResourceService {
     private final ProjectMapper projectMapper;
     private final RuntimeMapper runtimeMapper;
     private final TaskMapper taskMapper;
+    private final ChatSessionMapper chatSessionMapper;
+    private final ChatMessageMapper chatMessageMapper;
+    private final IssueMapper issueMapper;
     private final InboxMapper inboxMapper;
     private final NettyWsHub wsHub;
 
@@ -124,6 +133,10 @@ public class ResourceService {
             if (!StringUtils.hasText(status)) {
                 throw new IllegalArgumentException("状态不能为空");
             }
+            if (!"idle".equals(status) && !"archived".equals(status)
+                    && !"busy".equals(status) && !"online".equals(status)) {
+                throw new IllegalArgumentException("不支持的状态: " + status);
+            }
             a.setStatus(status);
         }
         if (body.containsKey("skillIds")) {
@@ -132,7 +145,39 @@ public class ResourceService {
         }
         a.setUpdatedAt(LocalDateTime.now());
         agentMapper.updateById(a);
-        return agentView(a);
+        Map<String, Object> view = agentView(a);
+        wsHub.publish(p.workspaceId(), Map.of("type", "agent.updated", "agent", view));
+        return view;
+    }
+
+    /** 归档：保留全部 task，恢复后可继续；不可再领取新任务。 */
+    @Transactional
+    public Map<String, Object> archiveAgent(AuthPrincipal p, Long id) {
+        AgentEntity a = requireAgent(p, id);
+        if ("archived".equalsIgnoreCase(a.getStatus())) {
+            return agentView(a);
+        }
+        a.setStatus("archived");
+        a.setUpdatedAt(LocalDateTime.now());
+        agentMapper.updateById(a);
+        Map<String, Object> view = agentView(a);
+        wsHub.publish(p.workspaceId(), Map.of("type", "agent.updated", "agent", view));
+        return view;
+    }
+
+    /** 从归档恢复为 idle，历史 task 原样保留。 */
+    @Transactional
+    public Map<String, Object> restoreAgent(AuthPrincipal p, Long id) {
+        AgentEntity a = requireAgent(p, id);
+        if (!"archived".equalsIgnoreCase(a.getStatus())) {
+            throw new IllegalArgumentException("仅已归档智能体可恢复");
+        }
+        a.setStatus("idle");
+        a.setUpdatedAt(LocalDateTime.now());
+        agentMapper.updateById(a);
+        Map<String, Object> view = agentView(a);
+        wsHub.publish(p.workspaceId(), Map.of("type", "agent.updated", "agent", view));
+        return view;
     }
 
     /** 已归档智能体不可再入队 / 开聊。 */
@@ -142,9 +187,43 @@ public class ResourceService {
         }
     }
 
+    /**
+     * 永久删除智能体并抹去相关记录：skills 绑定、task、chat 会话与消息；
+     * Issue 指派到该 Agent 的取消指派。Agent 行物理删除。
+     */
+    @Transactional
     public void deleteAgent(AuthPrincipal p, Long id) {
-        requireAgent(p, id);
-        agentMapper.deleteById(id);
+        AgentEntity a = requireAgent(p, id);
+        // skills
+        agentSkillMapper.delete(new LambdaQueryWrapper<AgentSkillEntity>().eq(AgentSkillEntity::getAgentId, id));
+        // tasks
+        taskMapper.delete(new LambdaQueryWrapper<TaskEntity>()
+                .eq(TaskEntity::getWorkspaceId, p.workspaceId())
+                .eq(TaskEntity::getAgentId, id));
+        // chats
+        List<ChatSessionEntity> sessions = chatSessionMapper.selectList(new LambdaQueryWrapper<ChatSessionEntity>()
+                .eq(ChatSessionEntity::getWorkspaceId, p.workspaceId())
+                .eq(ChatSessionEntity::getAgentId, id));
+        for (ChatSessionEntity s : sessions) {
+            chatMessageMapper.delete(new LambdaQueryWrapper<ChatMessageEntity>()
+                    .eq(ChatMessageEntity::getSessionId, s.getId()));
+            chatSessionMapper.deleteById(s.getId());
+        }
+        // issues assigned to this agent
+        List<IssueEntity> issues = issueMapper.selectList(new LambdaQueryWrapper<IssueEntity>()
+                .eq(IssueEntity::getWorkspaceId, p.workspaceId())
+                .eq(IssueEntity::getAssigneeType, "agent")
+                .eq(IssueEntity::getAssigneeId, id));
+        LocalDateTime now = LocalDateTime.now();
+        for (IssueEntity issue : issues) {
+            issue.setAssigneeType(null);
+            issue.setAssigneeId(null);
+            issue.setUpdatedAt(now);
+            issueMapper.updateById(issue);
+        }
+        // agent 物理删除（绕过 @TableLogic）
+        agentMapper.purgeById(id);
+        wsHub.publish(p.workspaceId(), Map.of("type", "agent.deleted", "id", String.valueOf(id), "name", a.getName()));
     }
 
     public AgentEntity requireAgent(AuthPrincipal p, Long id) {

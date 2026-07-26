@@ -389,24 +389,32 @@ public class OrchestrationService {
         resourceService.heartbeat(runtimeId);
 
         // 优先领取绑定该 runtime 的任务，其次领取同 provider 且 runtime 为空的任务
-		TaskEntity task = taskMapper.selectOne(new LambdaQueryWrapper<TaskEntity>()
+        List<TaskEntity> candidates = taskMapper.selectList(new LambdaQueryWrapper<TaskEntity>()
                 .eq(TaskEntity::getWorkspaceId, daemon.workspaceId())
                 .eq(TaskEntity::getStatus, "queued")
                 .and(w -> w.eq(TaskEntity::getRuntimeId, runtimeId)
                         .or().isNull(TaskEntity::getRuntimeId))
                 .orderByAsc(TaskEntity::getId)
-                .last("LIMIT 1"));
-        if (task == null) {
-            return Map.of("task", (Object) null);
+                .last("LIMIT 20"));
+        TaskEntity task = null;
+        AgentEntity agent = null;
+        AuthPrincipal asUser = new AuthPrincipal(daemon.userId(), daemon.email(), "session", daemon.workspaceId());
+        for (TaskEntity candidate : candidates) {
+            AgentEntity a;
+            try {
+                a = resourceService.requireAgent(asUser, candidate.getAgentId());
+            } catch (IllegalArgumentException ex) {
+                continue;
+            }
+            // 已归档：跳过领取，保留 task 供恢复后继续
+            if ("archived".equalsIgnoreCase(a.getStatus())) {
+                continue;
+            }
+            task = candidate;
+            agent = a;
+            break;
         }
-        AgentEntity agent = resourceService.requireAgent(
-                new AuthPrincipal(daemon.userId(), daemon.email(), "session", daemon.workspaceId()),
-                task.getAgentId());
-        if ("archived".equalsIgnoreCase(agent.getStatus())) {
-            task.setStatus(TaskStatuses.CANCELLED);
-            task.setFinishedAt(LocalDateTime.now());
-            task.setUpdatedAt(LocalDateTime.now());
-            taskMapper.updateById(task);
+        if (task == null || agent == null) {
             return Map.of("task", (Object) null);
         }
         // 已绑定其它 runtime 的任务不领；未绑定则要求 provider 匹配（stub 例外）

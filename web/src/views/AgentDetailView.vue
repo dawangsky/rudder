@@ -46,9 +46,13 @@ const err = ref('')
 const saving = ref(false)
 const okMsg = ref('')
 const showMore = ref(false)
+const showDelete = ref(false)
+const ackDelete = ref(false)
+const deleting = ref(false)
 let timer: number | undefined
 
 const agentId = computed(() => String(route.params.agentId || ''))
+const isArchived = computed(() => (agent.value?.status || '').toLowerCase() === 'archived')
 
 const tab = computed<AgentDetailTab>(() => {
   const t = String(route.query.tab || 'overview')
@@ -264,17 +268,57 @@ function goAssign() {
 }
 
 async function archiveAgent() {
-  if (!agent.value) return
-  if (!confirm(`归档智能体「${agent.value.name}」？归档后无法再领取新任务。`)) return
+  if (!agent.value || isArchived.value) return
+  if (!confirm(`归档智能体「${agent.value.name}」？\n归档后无法再领取新任务，历史 task 会保留，之后可恢复。`)) return
   showMore.value = false
+  err.value = ''
   try {
-    await apiFetch(`/api/agents/${agent.value.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: 'archived' }),
-    })
-    await router.replace({ name: 'agents' })
+    const updated = await apiFetch<Agent>(`/api/agents/${agent.value.id}/archive`, { method: 'POST' })
+    agent.value = updated
+    okMsg.value = '已归档。可在列表「已归档」中恢复。'
   } catch (e) {
     err.value = e instanceof Error ? e.message : '归档失败'
+  }
+}
+
+async function restoreAgent() {
+  if (!agent.value || !isArchived.value) return
+  showMore.value = false
+  err.value = ''
+  try {
+    const updated = await apiFetch<Agent>(`/api/agents/${agent.value.id}/restore`, { method: 'POST' })
+    agent.value = updated
+    okMsg.value = '已恢复'
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '恢复失败'
+  }
+}
+
+function openDelete() {
+  showMore.value = false
+  ackDelete.value = false
+  err.value = ''
+  showDelete.value = true
+}
+
+function closeDelete() {
+  if (deleting.value) return
+  showDelete.value = false
+  ackDelete.value = false
+}
+
+async function confirmDelete() {
+  if (!agent.value || !ackDelete.value) return
+  deleting.value = true
+  err.value = ''
+  try {
+    await apiFetch(`/api/agents/${agent.value.id}`, { method: 'DELETE' })
+    await router.replace({ name: 'agents' })
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '删除失败'
+  } finally {
+    deleting.value = false
+    showDelete.value = false
   }
 }
 
@@ -372,17 +416,24 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="hero-actions">
-        <button type="button" class="btn-ghost" @click="goChat">私信</button>
-        <button type="button" class="btn-primary" @click="goAssign">+ 分配工作</button>
+        <button v-if="!isArchived" type="button" class="btn-ghost" @click="goChat">私信</button>
+        <button v-if="!isArchived" type="button" class="btn-primary" @click="goAssign">+ 分配工作</button>
+        <button v-if="isArchived" type="button" class="btn-primary" @click="restoreAgent">恢复智能体</button>
         <div class="more-wrap">
           <button type="button" class="btn-icon" aria-label="更多" @click="showMore = !showMore">⋯</button>
           <div v-if="showMore" class="more-menu" @mouseleave="showMore = false">
-            <button type="button" @click="setTab('settings')">设置</button>
-            <button type="button" class="danger" @click="archiveAgent">归档</button>
+            <button type="button" @click="setTab('settings'); showMore = false">设置</button>
+            <button v-if="!isArchived" type="button" @click="archiveAgent">归档</button>
+            <button v-else type="button" @click="restoreAgent">恢复</button>
+            <button type="button" class="danger" @click="openDelete">删除…</button>
           </div>
         </div>
       </div>
     </header>
+
+    <div v-if="isArchived" class="archived-banner">
+      此智能体已归档。历史 task 仍保留；恢复后可继续使用。永久删除将抹去相关记录。
+    </div>
 
     <nav class="tabs" role="tablist">
       <button type="button" :class="{ on: tab === 'overview' }" @click="setTab('overview')">概览</button>
@@ -579,9 +630,29 @@ onUnmounted(() => {
           </label>
 
           <div class="set-actions">
-            <button type="button" class="btn-primary" :disabled="saving" @click="saveGeneral">
+            <button type="button" class="btn-primary" :disabled="saving || isArchived" @click="saveGeneral">
               {{ saving ? '保存中…' : '保存更改' }}
             </button>
+          </div>
+        </section>
+
+        <section class="set-block danger-zone">
+          <h3>危险操作</h3>
+          <p class="panel-lead">归档可恢复且保留 task；删除将永久抹去该智能体及其 task、聊天等记录。</p>
+          <div class="danger-actions">
+            <button
+              v-if="!isArchived"
+              type="button"
+              class="btn-warn"
+              @click="archiveAgent"
+            >归档智能体</button>
+            <button
+              v-else
+              type="button"
+              class="btn-ghost"
+              @click="restoreAgent"
+            >恢复智能体</button>
+            <button type="button" class="btn-del" @click="openDelete">永久删除</button>
           </div>
         </section>
       </div>
@@ -597,6 +668,34 @@ onUnmounted(() => {
           </h3>
           <p class="empty-lead">该分区将在二期开放。当前请使用「通用」管理基础配置。</p>
         </section>
+      </div>
+    </div>
+
+    <div v-if="showDelete" class="modal-backdrop" @click.self="closeDelete">
+      <div class="modal">
+        <h3>永久删除智能体？</h3>
+        <p>
+          将删除「{{ agent.name }}」及其全部相关记录：task、聊天会话与消息、Skills 绑定；Issue 上的指派会被清空。此操作不可恢复。
+        </p>
+        <div class="callout danger">
+          若只需停用，请改用「归档」——历史 task 会保留，之后可恢复。
+        </div>
+        <label class="ack">
+          <input v-model="ackDelete" type="checkbox" :disabled="deleting" />
+          <span>我已了解：删除将永久抹去该智能体及相关记录。</span>
+        </label>
+        <p v-if="err" class="error">{{ err }}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-ghost" :disabled="deleting" @click="closeDelete">取消</button>
+          <button
+            type="button"
+            class="btn-del modal-del"
+            :disabled="deleting || !ackDelete"
+            @click="confirmDelete"
+          >
+            {{ deleting ? '删除中…' : '永久删除' }}
+          </button>
+        </div>
       </div>
     </div>
   </section>
@@ -961,6 +1060,85 @@ h1 { margin: 0; font-size: 24px; }
 .error { color: var(--danger); }
 .ok { color: #047857; font-size: 13px; }
 .muted { color: var(--muted); }
+
+.archived-banner {
+  background: #fffbeb;
+  border: 1px solid #f6d98a;
+  color: #78350f;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.45;
+}
+.danger-zone h3 { color: #b42318; }
+.danger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-warn {
+  border: 1px solid #f6d98a;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-del {
+  border: none;
+  background: #fce8e6;
+  color: #b42318;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-del:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.modal {
+  width: min(440px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+}
+.modal h3 { margin: 0 0 8px; font-size: 17px; }
+.modal > p { font-size: 14px; line-height: 1.55; color: #374151; margin: 0 0 12px; }
+.callout.danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+.ack {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.ack input { margin-top: 2px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-del { width: auto; }
 
 @media (max-width: 900px) {
   .overview, .settings { grid-template-columns: 1fr; }

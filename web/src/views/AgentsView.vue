@@ -107,6 +107,45 @@ function openAgent(a: Agent) {
   router.push({ name: 'agent-detail', params: { agentId: a.id } })
 }
 
+async function restoreAgent(a: Agent) {
+  err.value = ''
+  try {
+    await apiFetch(`/api/agents/${a.id}/restore`, { method: 'POST' })
+    await load()
+    filter.value = 'mine'
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '恢复失败'
+  }
+}
+
+async function deleteAgent(a: Agent) {
+  const ok = confirm(
+    `永久删除智能体「${a.name}」？\n将抹去其全部 task、聊天等记录，不可恢复。\n若只需停用请改用归档。`,
+  )
+  if (!ok) return
+  err.value = ''
+  try {
+    await apiFetch(`/api/agents/${a.id}`, { method: 'DELETE' })
+    await load()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '删除失败'
+  }
+}
+
+async function archiveAgent(a: Agent) {
+  const ok = confirm(
+    `归档智能体「${a.name}」？\n归档后无法领取新任务，历史 task 保留，之后可恢复。`,
+  )
+  if (!ok) return
+  err.value = ''
+  try {
+    await apiFetch(`/api/agents/${a.id}/archive`, { method: 'POST' })
+    await load()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '归档失败'
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -164,14 +203,15 @@ onMounted(load)
             <th>运行时</th>
             <th>最近活跃</th>
             <th class="num">运行次数</th>
+            <th class="col-actions">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="8" class="empty">加载中…</td>
+            <td colspan="9" class="empty">加载中…</td>
           </tr>
           <tr v-else-if="!filtered.length">
-            <td colspan="8" class="empty">
+            <td colspan="9" class="empty">
               {{ filter === 'archived' ? '暂无已归档智能体' : '暂无智能体，点击「新建智能体」开始' }}
             </td>
           </tr>
@@ -205,7 +245,7 @@ onMounted(load)
               </div>
             </td>
             <td>
-              <span class="status" :class="{ on: statusOf(a) === '在线', busy: statusOf(a) === '忙碌' }">
+              <span class="status" :class="{ on: statusOf(a) === '在线', busy: statusOf(a) === '忙碌', archived: isArchived(a) }">
                 <i class="dot" />{{ statusOf(a) }}
               </span>
             </td>
@@ -219,6 +259,16 @@ onMounted(load)
             <td class="muted">{{ runtimeLabel(a) }}</td>
             <td class="muted">{{ formatRelative(a.updatedAt || a.createdAt) }}</td>
             <td class="num muted">—</td>
+            <td class="col-actions" @click.stop>
+              <template v-if="isArchived(a)">
+                <button type="button" class="link-btn" @click="restoreAgent(a)">恢复</button>
+                <button type="button" class="link-btn danger" @click="deleteAgent(a)">删除</button>
+              </template>
+              <template v-else>
+                <button type="button" class="link-btn" @click="archiveAgent(a)">归档</button>
+                <button type="button" class="link-btn danger" @click="deleteAgent(a)">删除</button>
+              </template>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -377,6 +427,22 @@ tr:last-child td { border-bottom: none; }
 .status.on .dot { background: #10b981; }
 .status.busy { color: #d97706; }
 .status.busy .dot { background: #f59e0b; }
+.status.archived { color: #92400e; }
+.status.archived .dot { background: #f59e0b; }
+.col-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+.link-btn {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.link-btn:hover { text-decoration: underline; }
+.link-btn.danger { color: #b42318; }
 .owner {
   display: inline-flex;
   align-items: center;

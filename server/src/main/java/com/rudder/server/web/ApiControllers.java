@@ -50,6 +50,16 @@ public class ApiControllers {
         return resourceService.updateAgent(session(), id, body);
     }
 
+    @PostMapping("/agents/{id}/archive")
+    public Map<String, Object> archiveAgent(@PathVariable Long id) {
+        return resourceService.archiveAgent(session(), id);
+    }
+
+    @PostMapping("/agents/{id}/restore")
+    public Map<String, Object> restoreAgent(@PathVariable Long id) {
+        return resourceService.restoreAgent(session(), id);
+    }
+
     @DeleteMapping("/agents/{id}")
     public Map<String, Object> deleteAgent(@PathVariable Long id) {
         resourceService.deleteAgent(session(), id);
