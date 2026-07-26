@@ -136,7 +136,7 @@ async function toggleEnabled(p: ProtocolRecord, enabled: boolean) {
     const msg = e instanceof Error ? e.message : '更新失败'
     protoErr.value = msg
     if (!enabled) {
-      showAlert(msg, '无法停用协议')
+      showAlert(msg, '无法停用运行时协议')
     }
     await refreshProtocols()
   } finally {
