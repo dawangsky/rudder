@@ -1,12 +1,54 @@
 <script setup lang="ts">
 /**
- * Provider 图标：优先自定义图，否则内置品牌标；其余用着色首字母。
+ * Provider 图标：优先自定义图，否则内置品牌标；未知协议用几何回退（不用首字母）。
  */
 import { computed } from 'vue'
 import claudeSvg from '@/assets/providers/claude.svg'
 import cursorSvg from '@/assets/providers/cursor.svg'
 import openaiSvg from '@/assets/providers/openai.svg'
+import opencodeSvg from '@/assets/providers/opencode.svg'
+import geminiSvg from '@/assets/providers/gemini.svg'
+import copilotSvg from '@/assets/providers/copilot.svg'
+import aiderSvg from '@/assets/providers/aider.svg'
+import gooseSvg from '@/assets/providers/goose.svg'
+import codebuddySvg from '@/assets/providers/codebuddy.svg'
+import qwenSvg from '@/assets/providers/qwen.svg'
+import kimiSvg from '@/assets/providers/kimi.svg'
+import qoderSvg from '@/assets/providers/qoder.svg'
+import traecliSvg from '@/assets/providers/traecli.svg'
+import kiroSvg from '@/assets/providers/kiro.svg'
+import grokSvg from '@/assets/providers/grok.svg'
+import hermesSvg from '@/assets/providers/hermes.svg'
+import piSvg from '@/assets/providers/pi.svg'
+import openclawSvg from '@/assets/providers/openclaw.svg'
+import antigravitySvg from '@/assets/providers/antigravity.svg'
+import devecoSvg from '@/assets/providers/deveco.svg'
 import { baseProviderOf } from '@/lib/runtimes'
+
+const BUILTIN: Record<string, string> = {
+  claude: claudeSvg,
+  claude_code: claudeSvg,
+  cursor: cursorSvg,
+  codex: openaiSvg,
+  openai: openaiSvg,
+  opencode: opencodeSvg,
+  gemini: geminiSvg,
+  copilot: copilotSvg,
+  aider: aiderSvg,
+  goose: gooseSvg,
+  codebuddy: codebuddySvg,
+  qwen: qwenSvg,
+  kimi: kimiSvg,
+  qoder: qoderSvg,
+  traecli: traecliSvg,
+  kiro: kiroSvg,
+  grok: grokSvg,
+  hermes: hermesSvg,
+  pi: piSvg,
+  openclaw: openclawSvg,
+  antigravity: antigravitySvg,
+  deveco: devecoSvg,
+}
 
 const props = withDefaults(
   defineProps<{
@@ -28,23 +70,17 @@ const kind = computed(() => {
   if (p === 'codex' || p === 'openai') return 'codex'
   if (p === 'cursor') return 'cursor'
   if (p === 'stub') return 'stub'
-  return p || 'fallback'
-})
-
-const letter = computed(() => {
-  const p = base.value || '?'
-  if (p === 'claude_code') return 'C'
-  if (p === 'opencode') return 'O'
-  if (p === 'codebuddy') return 'B'
-  if (p === 'traecli') return 'T'
-  return p.slice(0, 1).toUpperCase()
+  if (BUILTIN[p]) return p
+  return 'fallback'
 })
 
 const assetSrc = computed(() => {
+  if (props.customSrc) return ''
+  const p = base.value
   if (kind.value === 'claude') return claudeSvg
   if (kind.value === 'cursor') return cursorSvg
   if (kind.value === 'codex') return openaiSvg
-  return ''
+  return BUILTIN[p] || ''
 })
 </script>
 
@@ -68,7 +104,14 @@ const assetSrc = computed(() => {
       />
     </svg>
 
-    <span v-else class="fallback-letter">{{ letter }}</span>
+    <!-- 未知协议：几何块，避免首字母撞脸 -->
+    <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+      <rect width="24" height="24" rx="6" fill="#e5e7eb" />
+      <rect x="5" y="5" width="6" height="6" rx="1.5" fill="#9ca3af" />
+      <rect x="13" y="5" width="6" height="6" rx="1.5" fill="#6b7280" />
+      <rect x="5" y="13" width="6" height="6" rx="1.5" fill="#6b7280" />
+      <rect x="13" y="13" width="6" height="6" rx="1.5" fill="#9ca3af" />
+    </svg>
   </span>
 </template>
 
@@ -98,27 +141,21 @@ const assetSrc = computed(() => {
   padding: 3px;
   box-sizing: border-box;
 }
+.provider-icon.gemini {
+  background: #eff6ff;
+  padding: 3px;
+  box-sizing: border-box;
+}
+.provider-icon.copilot {
+  background: #f6f8fa;
+  padding: 2px;
+  box-sizing: border-box;
+}
 .provider-icon.stub,
-.provider-icon.custom {
+.provider-icon.custom,
+.provider-icon.fallback {
   background: #f3f4f6;
 }
-.provider-icon.opencode { background: #ecfdf5; color: #047857; }
-.provider-icon.gemini { background: #eff6ff; color: #1d4ed8; }
-.provider-icon.copilot { background: #f5f3ff; color: #6d28d9; }
-.provider-icon.aider { background: #fef3c7; color: #b45309; }
-.provider-icon.goose { background: #fdf2f8; color: #be185d; }
-.provider-icon.codebuddy { background: #fff1f2; color: #e11d48; }
-.provider-icon.qwen { background: #fff7ed; color: #c2410c; }
-.provider-icon.kimi { background: #f0f9ff; color: #0369a1; }
-.provider-icon.qoder { background: #fdf4ff; color: #a21caf; }
-.provider-icon.traecli { background: #ecfeff; color: #0e7490; }
-.provider-icon.kiro { background: #fefce8; color: #a16207; }
-.provider-icon.grok { background: #f4f4f5; color: #18181b; }
-.provider-icon.hermes { background: #fef2f2; color: #b91c1c; }
-.provider-icon.pi { background: #eef2ff; color: #4338ca; }
-.provider-icon.openclaw { background: #f7fee7; color: #4d7c0f; }
-.provider-icon.antigravity { background: #faf5ff; color: #7e22ce; }
-.provider-icon.deveco { background: #ecfdf5; color: #0f766e; }
 .provider-icon svg {
   width: 100%;
   height: 100%;
@@ -129,11 +166,5 @@ const assetSrc = computed(() => {
   height: 100%;
   object-fit: contain;
   display: block;
-}
-.fallback-letter {
-  font-size: 11px;
-  font-weight: 700;
-  color: inherit;
-  line-height: 1;
 }
 </style>
