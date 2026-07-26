@@ -5,8 +5,11 @@
   "main": "main.js",
   "scripts": {
     "postinstall": "node scripts/ensure-electron.js",
+    "predev": "node scripts/ensure-daemon.js",
+    "prestart": "node scripts/ensure-daemon.js",
     "dev": "electron .",
-    "start": "electron ."
+    "start": "electron .",
+    "ensure-daemon": "node scripts/ensure-daemon.js"
   },
   "devDependencies": {
     "electron": "33.2.1"

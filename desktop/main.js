@@ -11,15 +11,22 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const { spawn } = require('child_process')
+const { ensureDaemon } = require('./scripts/ensure-daemon')
 
 const WEB_DEV_URL = process.env.RUDDER_WEB_URL || 'http://127.0.0.1:5173'
-const RUDDER_CLI = process.env.RUDDER_CLI || path.join(__dirname, '..', 'daemon', 'rudder')
 const DESKTOP_PROFILE = 'desktop'
 
 let mainWindow = null
 let daemonChild = null
 /** 本次进程内记录的启动时间（用于 Uptime 展示） */
 let daemonStartedAt = null
+/** ensure-daemon 结果 */
+let daemonEnsure = { ok: false, version: '', message: '', binary: '' }
+
+function resolveCliPath() {
+  if (process.env.RUDDER_CLI) return process.env.RUDDER_CLI
+  return daemonEnsure.binary || path.join(__dirname, '..', 'daemon', 'rudder')
+}
 
 function profileHome() {
   return path.join(os.homedir(), '.rudder', 'profiles', DESKTOP_PROFILE)
@@ -145,7 +152,7 @@ function createWindow() {
 
 function runCli(args) {
   return new Promise((resolve) => {
-    const child = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, ...args], {
+    const child = spawn(resolveCliPath(), ['--profile', DESKTOP_PROFILE, ...args], {
       shell: false,
       env: cliEnv(),
     })
@@ -174,14 +181,18 @@ async function startDaemonProcess() {
   if (!readCredentials()?.daemonToken) {
     return { running: false, message: 'Desktop Daemon 未启动：请先登录（将自动同步凭证）' }
   }
-  daemonChild = spawn(RUDDER_CLI, ['--profile', DESKTOP_PROFILE, 'daemon', 'start'], {
+  const cli = resolveCliPath()
+  if (!fs.existsSync(cli)) {
+    return { running: false, message: `Daemon 二进制不存在：${cli}` }
+  }
+  daemonChild = spawn(cli, ['--profile', DESKTOP_PROFILE, 'daemon', 'start'], {
     detached: true,
     stdio: 'ignore',
     env: cliEnv(),
   })
   daemonChild.unref()
   daemonStartedAt = Date.now()
-  return { running: true, message: `已启动 Desktop Daemon（profile=${DESKTOP_PROFILE}）` }
+  return { running: true, message: `已启动 Desktop Daemon（profile=${DESKTOP_PROFILE} · v${daemonEnsure.version || '?'}）` }
 }
 
 async function buildStatus() {
@@ -191,7 +202,15 @@ async function buildStatus() {
   const email = creds?.email || ''
   const prefs = readPrefs()
   const pid = readPid()
-  const cliInstalled = fs.existsSync(RUDDER_CLI)
+  const cli = resolveCliPath()
+  const cliInstalled = fs.existsSync(cli)
+  const ver = await runCli(['version', '--json'])
+  let cliVersion = daemonEnsure.version || ''
+  try {
+    cliVersion = JSON.parse(ver.out || '{}').version || cliVersion
+  } catch {
+    /* ignore */
+  }
   return {
     running,
     email,
@@ -202,12 +221,15 @@ async function buildStatus() {
     deviceName: os.hostname(),
     uptime: running && daemonStartedAt ? formatUptime(Date.now() - daemonStartedAt) : (running ? '—' : '—'),
     cliInstalled,
-    cliPath: RUDDER_CLI,
+    cliPath: cli,
+    cliVersion,
+    cliEnsureOk: !!daemonEnsure.ok,
+    cliEnsureMessage: daemonEnsure.message || '',
     autoStartOnLaunch: !!prefs.autoStartOnLaunch,
     autoStopOnQuit: !!prefs.autoStopOnQuit,
     message: email
       ? (running
-        ? `Daemon 运行中 · desktop · ${email}`
+        ? `Daemon 运行中 · desktop · v${cliVersion || '?'} · ${email}`
         : `Daemon 未运行 · desktop · 已绑定 ${email}`)
       : ((r.out || r.err || 'ok').trim()),
   }
@@ -325,10 +347,19 @@ ipcMain.handle('dialog:select-directory', async () => {
 })
 
 app.whenReady().then(async () => {
+  // 启动前对齐 Daemon 版本，避免落后二进制导致协议探测等功能缺失
+  daemonEnsure = ensureDaemon()
+  if (!daemonEnsure.ok) {
+    console.warn('[desktop]', daemonEnsure.message)
+  } else if (daemonEnsure.rebuilt) {
+    console.log('[desktop]', daemonEnsure.message)
+  }
+
   createWindow()
   const prefs = readPrefs()
   if (prefs.autoStartOnLaunch) {
     try {
+      // 版本刚升级时强制用新二进制重启
       await startDaemonProcess()
     } catch {
       /* ignore */

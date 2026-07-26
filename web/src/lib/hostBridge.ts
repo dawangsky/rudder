@@ -12,6 +12,9 @@ export type DaemonStatus = {
   uptime?: string
   cliInstalled?: boolean
   cliPath?: string
+  cliVersion?: string
+  cliEnsureOk?: boolean
+  cliEnsureMessage?: string
   autoStartOnLaunch?: boolean
   autoStopOnQuit?: boolean
 }

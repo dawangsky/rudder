@@ -320,10 +320,11 @@ onUnmounted(() => {
         <div class="card soft">
           <div class="cli-line">
             <template v-if="status?.cliInstalled">
-              rudder CLI 已安装，可供 Desktop 调用。
+              rudder CLI v{{ status?.cliVersion || '?' }} 已就绪
+              <span v-if="status?.cliEnsureOk === false" class="warn-inline">（{{ status?.cliEnsureMessage || '版本校验失败' }}）</span>
             </template>
             <template v-else>
-              未找到 rudder CLI（{{ status?.cliPath || '—' }}）。请先编译 daemon 二进制。
+              未找到 rudder CLI（{{ status?.cliPath || '—' }}）。请先编译 daemon 二进制，或重启 Desktop 触发自动编译。
             </template>
           </div>
         </div>
@@ -338,6 +339,10 @@ onUnmounted(() => {
                 <span class="dot" :class="{ on: status?.running }" />
                 {{ status?.running ? 'Running' : 'Stopped' }}
               </dd>
+            </div>
+            <div class="kv-row">
+              <dt>CLI 版本</dt>
+              <dd class="mono">{{ status?.cliVersion || '—' }}</dd>
             </div>
             <div class="kv-row">
               <dt>Uptime</dt>
@@ -562,6 +567,7 @@ onUnmounted(() => {
 .row-title { font-size: 14px; font-weight: 600; }
 .row-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .cli-line { font-size: 13px; color: var(--text); }
+.warn-inline { color: var(--danger, #c44); margin-left: 6px; }
 .proto-row {
   display: flex;
   align-items: center;

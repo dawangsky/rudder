@@ -2,9 +2,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/dawangsky/rudder/daemon/internal/config"
+	"github.com/dawangsky/rudder/daemon/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -49,11 +51,23 @@ func init() {
 }
 
 func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "打印 CLI 版本",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("rudder-cli 0.1.0-dev")
+			if asJSON {
+				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
+					"name":    "rudder-cli",
+					"version": version.Version,
+					"commit":  version.Commit,
+					"builtAt": version.BuiltAt,
+				})
+				return
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "rudder-cli %s\n", version.Version)
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "以 JSON 输出")
+	return cmd
 }

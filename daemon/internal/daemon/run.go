@@ -14,6 +14,7 @@ import (
 	"github.com/dawangsky/rudder/daemon/internal/execenv"
 	"github.com/dawangsky/rudder/daemon/internal/provider"
 	"github.com/dawangsky/rudder/daemon/internal/skills"
+	"github.com/dawangsky/rudder/daemon/internal/version"
 )
 
 // Run 常驻循环：内置自动探测 + 自定义命令运行时心跳领任务。
@@ -34,7 +35,7 @@ func Run(serverOverride string) error {
 	}
 	host, _ := os.Hostname()
 
-	fmt.Printf("daemon profile=%s instance=%s email=%s\n", config.ProfileName(), daemonID, creds.Email)
+	fmt.Printf("daemon profile=%s version=%s instance=%s email=%s\n", config.ProfileName(), version.Version, daemonID, creds.Email)
 
 	runtimeIDs := map[string]string{}
 	customCmds := map[string]string{}
