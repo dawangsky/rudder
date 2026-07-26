@@ -75,6 +75,32 @@ public class ApiControllers {
         return resourceService.createSkill(session(), body);
     }
 
+    @DeleteMapping("/skills/{id}")
+    public Map<String, Object> deleteSkill(@PathVariable Long id) {
+        resourceService.deleteSkill(session(), id);
+        return Map.of("ok", true);
+    }
+
+    @PostMapping("/skills/import-url")
+    public Map<String, Object> importSkillUrl(@RequestBody Map<String, Object> body) {
+        return resourceService.importSkillFromUrl(session(), body);
+    }
+
+    @PostMapping("/skills/preview-url")
+    public Map<String, Object> previewSkillUrl(@RequestBody Map<String, Object> body) {
+        return resourceService.previewSkillUrl(session(), body);
+    }
+
+    @PostMapping("/skills/from-runtime")
+    public Map<String, Object> skillFromRuntime(@RequestBody Map<String, Object> body) {
+        return resourceService.createSkillFromRuntime(session(), body);
+    }
+
+    @GetMapping("/runtimes/{id}/skills")
+    public List<Map<String, Object>> runtimeSkills(@PathVariable Long id) {
+        return resourceService.listRuntimeSkills(session(), id);
+    }
+
     // Project
     @GetMapping("/projects")
     public List<Map<String, Object>> projects() { return resourceService.listProjects(session()); }
@@ -205,6 +231,11 @@ public class ApiControllers {
         daemon();
         resourceService.heartbeat(Long.parseLong(String.valueOf(body.get("runtimeId"))));
         return Map.of("ok", true);
+    }
+
+    @PostMapping("/daemon/skills/report")
+    public Map<String, Object> reportSkills(@RequestBody Map<String, Object> body) {
+        return resourceService.reportRuntimeSkills(daemon(), body);
     }
 
     @PostMapping("/daemon/claim")

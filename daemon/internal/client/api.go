@@ -81,3 +81,12 @@ func (a *API) DeleteRuntimeByProvider(daemonID, provider string) error {
 	path := "/api/daemon/runtimes/provider/" + provider + "?daemonId=" + daemonID
 	return a.do(http.MethodDelete, path, nil, nil)
 }
+
+// ReportSkills 上报本机扫描到的 skill 列表（按 runtime 整包替换）。
+func (a *API) ReportSkills(daemonID, runtimeID string, skills []map[string]any) error {
+	return a.do(http.MethodPost, "/api/daemon/skills/report", map[string]any{
+		"daemonId":  daemonID,
+		"runtimeId": runtimeID,
+		"skills":    skills,
+	}, nil)
+}

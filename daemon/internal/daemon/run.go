@@ -12,6 +12,7 @@ import (
 	"github.com/dawangsky/rudder/daemon/internal/detect"
 	"github.com/dawangsky/rudder/daemon/internal/execenv"
 	"github.com/dawangsky/rudder/daemon/internal/provider"
+	"github.com/dawangsky/rudder/daemon/internal/skills"
 )
 
 // Run 常驻循环：内置自动探测 + 自定义命令运行时心跳领任务。
@@ -49,9 +50,13 @@ func Run(serverOverride string) error {
 	tickPoll := time.NewTicker(3 * time.Second)
 	tickHB := time.NewTicker(15 * time.Second)
 	tickSync := time.NewTicker(10 * time.Second)
+	tickSkills := time.NewTicker(30 * time.Second)
 	defer tickPoll.Stop()
 	defer tickHB.Stop()
 	defer tickSync.Stop()
+	defer tickSkills.Stop()
+
+	reportLocalSkills(api, daemonID, runtimeIDs)
 
 	for {
 		select {
@@ -61,6 +66,8 @@ func Run(serverOverride string) error {
 			}
 		case <-tickSync.C:
 			syncProviders(api, daemonID, host, creds.Email, runtimeIDs, customCmds)
+		case <-tickSkills.C:
+			reportLocalSkills(api, daemonID, runtimeIDs)
 		case <-tickPoll.C:
 			for prov, id := range runtimeIDs {
 				claim, err := api.Claim(id)
@@ -69,6 +76,28 @@ func Run(serverOverride string) error {
 				}
 				go handleClaim(api, prov, claim, customCmds[prov])
 			}
+		}
+	}
+}
+
+func reportLocalSkills(api *client.API, daemonID string, runtimeIDs map[string]string) {
+	if len(runtimeIDs) == 0 {
+		return
+	}
+	found := skills.ScanLocal()
+	payload := make([]map[string]any, 0, len(found))
+	for _, s := range found {
+		payload = append(payload, map[string]any{
+			"name":        s.Name,
+			"description": s.Description,
+			"content":     s.Content,
+			"sourcePath":  s.SourcePath,
+			"contentHash": s.ContentHash,
+		})
+	}
+	for _, id := range runtimeIDs {
+		if err := api.ReportSkills(daemonID, id, payload); err != nil {
+			fmt.Printf("report skills runtime=%s failed: %v\n", id, err)
 		}
 	}
 }

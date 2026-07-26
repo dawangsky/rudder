@@ -51,3 +51,42 @@ CREATE TABLE IF NOT EXISTS rb_user_token (
     KEY idx_token_hash (token_hash),
     KEY idx_token_user (user_id)
 ) COMMENT='用户会话 Token 与 Daemon Token（分离）';
+
+CREATE TABLE IF NOT EXISTS rb_skill (
+    id           BIGINT PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    name         VARCHAR(128) NOT NULL,
+    description  VARCHAR(512) NULL COMMENT '简介（可从 frontmatter 解析）',
+    content      MEDIUMTEXT NOT NULL,
+    source_type  VARCHAR(32) NOT NULL DEFAULT 'manual' COMMENT 'manual|url|runtime',
+    source_ref   VARCHAR(512) NULL COMMENT '来源 URL 或运行时路径',
+    created_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    deleted      TINYINT NOT NULL DEFAULT 0,
+    KEY idx_skill_ws (workspace_id)
+) COMMENT='工作区 Skill（任意智能体可挂载）';
+
+CREATE TABLE IF NOT EXISTS rb_agent_skill (
+    id         BIGINT PRIMARY KEY,
+    agent_id   BIGINT NOT NULL,
+    skill_id   BIGINT NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uk_agent_skill (agent_id, skill_id)
+) COMMENT='Agent-Skill 挂载';
+
+CREATE TABLE IF NOT EXISTS rb_runtime_skill (
+    id           BIGINT PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    runtime_id   BIGINT NOT NULL,
+    daemon_id    VARCHAR(128) NOT NULL DEFAULT '',
+    name         VARCHAR(128) NOT NULL,
+    description  VARCHAR(512) NULL,
+    content      MEDIUMTEXT NOT NULL,
+    source_path  VARCHAR(512) NOT NULL,
+    content_hash VARCHAR(64) NOT NULL DEFAULT '',
+    reported_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    deleted      TINYINT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_rt_skill_path (runtime_id, source_path),
+    KEY idx_rt_skill_ws (workspace_id),
+    KEY idx_rt_skill_runtime (runtime_id)
+) COMMENT='Daemon 上报的本机 skill 缓存';

@@ -3,22 +3,27 @@ package com.rudder.server.domain;
 import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Skill 表 rb_skill */
-@TableName("rb_skill")
+/** Daemon 上报的本机 skill 缓存 rb_runtime_skill（整包替换，物理删除） */
+@TableName("rb_runtime_skill")
 @Data
 @NoArgsConstructor
-public class SkillEntity {
+public class RuntimeSkillEntity {
 
     @TableId("id")
     private Long id;
 
     @TableField("workspace_id")
     private Long workspaceId;
+
+    @TableField("runtime_id")
+    private Long runtimeId;
+
+    @TableField("daemon_id")
+    private String daemonId;
 
     @TableField("name")
     private String name;
@@ -29,20 +34,15 @@ public class SkillEntity {
     @TableField("content")
     private String content;
 
-    /** manual | url | runtime */
-    @TableField("source_type")
-    private String sourceType;
+    @TableField("source_path")
+    private String sourcePath;
 
-    @TableField("source_ref")
-    private String sourceRef;
+    @TableField("content_hash")
+    private String contentHash;
 
-    @TableField("created_at")
-    private LocalDateTime createdAt;
+    @TableField("reported_at")
+    private LocalDateTime reportedAt;
 
-    @TableField("updated_at")
-    private LocalDateTime updatedAt;
-
-    @TableLogic
     @TableField("deleted")
     private Integer deleted;
 }
