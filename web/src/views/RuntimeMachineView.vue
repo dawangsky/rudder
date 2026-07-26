@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api'
 import { getHostBridge } from '@/lib/hostBridge'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
+import ActionIcon from '@/components/ActionIcon.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import {
@@ -530,13 +531,19 @@ onUnmounted(() => {
                 @update:open="(v) => setMenuOpen(r.id, v)"
               >
                 <template #default="{ close }">
-                  <button type="button" @click="close(); goRuntime(r.id)">查看详情</button>
+                  <button type="button" @click="close(); goRuntime(r.id)">
+                    <ActionIcon name="detail" />
+                    查看详情
+                  </button>
                   <button
                     type="button"
                     class="danger"
                     :disabled="removing"
                     @click="close(); askDeleteRuntime(r)"
-                  >删除</button>
+                  >
+                    <ActionIcon name="delete" />
+                    删除
+                  </button>
                 </template>
               </MoreMenu>
             </td>

@@ -15,6 +15,7 @@ import {
   type AgentSettingsSection,
 } from '@/lib/agents'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import ActionIcon from '@/components/ActionIcon.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon } from '@/lib/providerIcons'
 import {
@@ -433,16 +434,37 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="hero-actions">
-        <button v-if="!isArchived" type="button" class="btn-ghost" @click="goChat">私信</button>
-        <button v-if="!isArchived" type="button" class="btn-primary" @click="goAssign">+ 分配工作</button>
-        <button v-if="isArchived" type="button" class="btn-primary" @click="restoreAgent">恢复智能体</button>
+        <button v-if="!isArchived" type="button" class="btn-ghost" @click="goChat">
+          <ActionIcon name="chat" />
+          私信
+        </button>
+        <button v-if="!isArchived" type="button" class="btn-primary" @click="goAssign">
+          <ActionIcon name="assign" />
+          分配工作
+        </button>
+        <button v-if="isArchived" type="button" class="btn-primary" @click="restoreAgent">
+          <ActionIcon name="restore" />
+          恢复智能体
+        </button>
         <div class="more-wrap">
           <button type="button" class="btn-icon" aria-label="更多" @click="showMore = !showMore">⋯</button>
           <div v-if="showMore" class="more-menu" @mouseleave="showMore = false">
-            <button type="button" @click="setTab('settings'); showMore = false">设置</button>
-            <button v-if="!isArchived" type="button" @click="askArchive">归档</button>
-            <button v-else type="button" @click="restoreAgent">恢复</button>
-            <button type="button" class="danger" @click="openDelete">删除…</button>
+            <button type="button" @click="setTab('settings'); showMore = false">
+              <ActionIcon name="settings" />
+              设置
+            </button>
+            <button v-if="!isArchived" type="button" @click="askArchive">
+              <ActionIcon name="archive" />
+              归档
+            </button>
+            <button v-else type="button" @click="restoreAgent">
+              <ActionIcon name="restore" />
+              恢复
+            </button>
+            <button type="button" class="danger" @click="openDelete">
+              <ActionIcon name="delete" />
+              删除
+            </button>
           </div>
         </div>
       </div>
@@ -662,14 +684,23 @@ onUnmounted(() => {
               type="button"
               class="btn-warn"
               @click="askArchive"
-            >归档智能体</button>
+            >
+              <ActionIcon name="archive" />
+              归档智能体
+            </button>
             <button
               v-else
               type="button"
               class="btn-ghost"
               @click="restoreAgent"
-            >恢复智能体</button>
-            <button type="button" class="btn-del" @click="openDelete">永久删除</button>
+            >
+              <ActionIcon name="restore" />
+              恢复智能体
+            </button>
+            <button type="button" class="btn-del" @click="openDelete">
+              <ActionIcon name="delete" />
+              永久删除
+            </button>
           </div>
         </section>
       </div>
@@ -813,6 +844,9 @@ h1 { margin: 0; font-size: 24px; }
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn-primary {
   border: none;
@@ -823,6 +857,9 @@ h1 { margin: 0; font-size: 24px; }
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-icon {
@@ -849,7 +886,9 @@ h1 { margin: 0; font-size: 24px; }
   padding: 4px;
 }
 .more-menu button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   border: none;
@@ -1103,6 +1142,9 @@ h1 { margin: 0; font-size: 24px; }
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn-del {
   border: none;
@@ -1113,6 +1155,9 @@ h1 { margin: 0; font-size: 24px; }
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn-del:disabled { opacity: 0.45; cursor: not-allowed; }
 .dialog-err { margin: 0 0 8px; }

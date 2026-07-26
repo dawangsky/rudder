@@ -15,6 +15,7 @@ import {
 import { ownerDisplayName, ownerInitials } from '@/lib/agents'
 import { getSessionEmail } from '@/lib/session'
 import ProviderIcon from '@/components/ProviderIcon.vue'
+import ActionIcon from '@/components/ActionIcon.vue'
 import {
   formatHeartbeat,
   providerLabel,
@@ -334,7 +335,10 @@ onUnmounted(() => {
             <span class="vis active">私有</span>
             <span class="vis disabled" title="二期">公开</span>
           </div>
-          <button type="button" class="btn-del" @click="openDelete">删除运行时</button>
+          <button type="button" class="btn-del" @click="openDelete">
+            <ActionIcon name="delete" />
+            删除运行时
+          </button>
         </div>
       </aside>
     </div>
@@ -622,6 +626,10 @@ h1 { margin: 0; font-size: 24px; }
   cursor: pointer;
   font-weight: 600;
   font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 .btn-del:disabled {
   opacity: 0.45;

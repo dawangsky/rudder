@@ -15,6 +15,7 @@ import {
 } from '@/lib/agents'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
+import ActionIcon from '@/components/ActionIcon.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon } from '@/lib/providerIcons'
 import { displayName, providerLabel, type Runtime } from '@/lib/runtimes'
@@ -296,19 +297,28 @@ onMounted(load)
                     type="button"
                     :disabled="busy"
                     @click="close(); restoreAgent(a)"
-                  >恢复</button>
+                  >
+                    <ActionIcon name="restore" />
+                    恢复
+                  </button>
                   <button
                     v-else
                     type="button"
                     :disabled="busy"
                     @click="close(); askArchive(a)"
-                  >归档</button>
+                  >
+                    <ActionIcon name="archive" />
+                    归档
+                  </button>
                   <button
                     type="button"
                     class="danger"
                     :disabled="busy"
                     @click="close(); askDelete(a)"
-                  >删除</button>
+                  >
+                    <ActionIcon name="delete" />
+                    删除
+                  </button>
                 </template>
               </MoreMenu>
             </td>

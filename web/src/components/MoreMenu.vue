@@ -82,7 +82,9 @@ defineExpose({ close })
   z-index: 30;
 }
 .more-menu :deep(button) {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   border: none;
