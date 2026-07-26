@@ -42,11 +42,7 @@ const startDate = ref('')
 const dueDate = ref('')
 const openChip = ref<ChipMenu>(null)
 
-const workspaceName = computed(() => {
-  // session 仅存 id；展示用短名
-  const id = getWorkspaceId()
-  return id ? '工作区' : 'dev'
-})
+const workspaceName = ref('工作区')
 
 const canCreate = computed(() => name.value.trim().length > 0)
 
@@ -64,12 +60,16 @@ async function load() {
   loading.value = true
   err.value = ''
   try {
-    const [projects, ms] = await Promise.all([
+    const wsId = getWorkspaceId()
+    const [projects, ms, workspaces] = await Promise.all([
       apiFetch<Project[]>('/api/projects'),
       apiFetch<WorkspaceMember[]>('/api/auth/workspace-members').catch(() => [] as WorkspaceMember[]),
+      apiFetch<{ id: string; name?: string; slug?: string }[]>('/api/auth/workspaces').catch(() => []),
     ])
     items.value = projects
     members.value = ms
+    const current = workspaces.find((w) => String(w.id) === String(wsId))
+    workspaceName.value = current?.name || current?.slug || '工作区'
   } catch (e) {
     err.value = e instanceof Error ? e.message : '加载失败'
   } finally {
