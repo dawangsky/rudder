@@ -410,7 +410,7 @@ onUnmounted(() => {
         <p v-if="saved" class="ok">已保存到本地。</p>
       </div>
 
-      <div v-else-if="section === 'protocols'" class="panel-page">
+      <div v-else-if="section === 'protocols'" class="panel-page protocols-page">
         <header class="page-head row-head">
           <div>
             <h2>运行时协议</h2>
@@ -421,29 +421,16 @@ onUnmounted(() => {
 
         <p v-if="protoErr" class="error">{{ protoErr }}</p>
 
-        <div class="card">
-          <div v-for="p in protocols" :key="p.value" class="proto-row">
-            <ProviderIcon :provider="p.value" :size="28" />
-            <div class="proto-meta">
-              <div class="proto-title">
-                <strong>{{ p.label }}</strong>
-                <span class="tag" :class="{ builtin: p.builtin }">{{ p.builtin ? '内置' : '自定义' }}</span>
-                <span v-if="p.region === 'cn'" class="tag region">国产</span>
-              </div>
-              <div class="proto-sub mono">{{ p.value }} · bins: {{ (p.bins || []).join(', ') || '—' }}</div>
-            </div>
-            <div class="proto-actions">
-              <button type="button" class="linkish" :disabled="protoBusy" @click="openEdit(p)">编辑</button>
-              <button
-                v-if="!p.builtin"
-                type="button"
-                class="linkish danger"
-                :disabled="protoBusy"
-                @click="removeProtocol(p)"
-              >
-                删除
-              </button>
-              <label class="switch">
+        <div v-if="protocols.length" class="proto-grid">
+          <article
+            v-for="p in protocols"
+            :key="p.value"
+            class="proto-card"
+            :class="{ off: p.enabled === false }"
+          >
+            <div class="proto-card-top">
+              <ProviderIcon :provider="p.value" :size="40" />
+              <label class="switch" :title="p.enabled === false ? '已停用' : '已启用'">
                 <input
                   type="checkbox"
                   :checked="p.enabled !== false"
@@ -453,9 +440,46 @@ onUnmounted(() => {
                 <span class="slider" />
               </label>
             </div>
-          </div>
-          <p v-if="!protocols.length" class="empty-proto">暂无协议，点击「添加协议」或等待种子同步。</p>
+            <div class="proto-card-body">
+              <div class="proto-title">
+                <strong>{{ p.label }}</strong>
+              </div>
+              <div class="proto-tags">
+                <span class="tag" :class="{ builtin: p.builtin }">{{ p.builtin ? '内置' : '自定义' }}</span>
+                <span v-if="p.region === 'cn'" class="tag region">国产</span>
+                <span v-else-if="p.region === 'test'" class="tag">测试</span>
+                <span v-if="p.enabled === false" class="tag off">已停用</span>
+              </div>
+              <dl class="proto-facts">
+                <div>
+                  <dt>标识</dt>
+                  <dd class="mono">{{ p.value }}</dd>
+                </div>
+                <div>
+                  <dt>Bins</dt>
+                  <dd class="mono">{{ (p.bins || []).join(', ') || '—' }}</dd>
+                </div>
+                <div v-if="p.commandHint">
+                  <dt>示例</dt>
+                  <dd class="mono hint">{{ p.commandHint }}</dd>
+                </div>
+              </dl>
+            </div>
+            <div class="proto-card-foot">
+              <button type="button" class="card-btn" :disabled="protoBusy" @click="openEdit(p)">编辑</button>
+              <button
+                v-if="!p.builtin"
+                type="button"
+                class="card-btn danger"
+                :disabled="protoBusy"
+                @click="removeProtocol(p)"
+              >
+                删除
+              </button>
+            </div>
+          </article>
         </div>
+        <p v-else class="empty-proto">暂无协议，点击「添加协议」或等待种子同步。</p>
 
         <div v-if="showAdd" class="modal-mask" @click.self="closeForm">
           <div class="modal">
@@ -564,6 +588,7 @@ onUnmounted(() => {
 .nav-item:disabled { opacity: 0.4; cursor: not-allowed; }
 .settings-main { flex: 1; min-width: 0; overflow: auto; background: var(--bg); }
 .panel-page { padding: 28px 36px 40px; max-width: 820px; }
+.protocols-page { max-width: 1080px; }
 .page-head h2 { margin: 0 0 6px; font-size: 22px; }
 .row-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .desc { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
@@ -588,20 +613,54 @@ onUnmounted(() => {
 .row-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .cli-line { font-size: 13px; color: var(--text); }
 .warn-inline { color: var(--danger, #c44); margin-left: 6px; }
-.proto-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+.proto-grid {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
 }
-.proto-row:last-child { border-bottom: none; }
-.proto-meta { flex: 1; min-width: 0; }
-.proto-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
-.proto-sub { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.proto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  min-height: 210px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.proto-card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+.proto-card.off {
+  opacity: 0.72;
+  background: #fafafa;
+}
+.proto-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.proto-card-body { flex: 1; min-width: 0; }
+.proto-title {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text);
+}
+.proto-title strong { font-weight: 650; }
+.proto-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
 .tag {
   font-size: 11px;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 999px;
   background: #f3f4f6;
   color: var(--muted);
@@ -609,7 +668,56 @@ onUnmounted(() => {
 }
 .tag.builtin { background: #ecfdf5; color: #047857; }
 .tag.region { background: #fff7ed; color: #c2410c; }
-.proto-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.tag.off { background: #f3f4f6; color: #6b7280; }
+.proto-facts {
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+}
+.proto-facts > div {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.proto-facts dt {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 1px;
+}
+.proto-facts dd {
+  margin: 0;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.4;
+}
+.proto-facts .hint {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.proto-card-foot {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+}
+.card-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.card-btn:hover:not(:disabled) { background: #f9fafb; }
+.card-btn.danger { color: #b42318; }
+.card-btn.danger:hover:not(:disabled) { background: #fef2f2; }
+.card-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .linkish {
   border: none;
   background: transparent;
@@ -620,7 +728,16 @@ onUnmounted(() => {
 }
 .linkish:hover { color: var(--text); }
 .linkish.danger:hover { color: #b42318; }
-.empty-proto { margin: 0; padding: 24px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+.empty-proto {
+  margin: 20px 0 0;
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+}
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -745,6 +862,6 @@ onUnmounted(() => {
   .panel-page { padding: 20px; }
   .kv-row { grid-template-columns: 110px 1fr; }
   .row-head { flex-direction: column; }
-  .proto-row { flex-wrap: wrap; }
+  .proto-grid { grid-template-columns: 1fr; }
 }
 </style>
