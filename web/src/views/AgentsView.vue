@@ -13,6 +13,7 @@ import {
   type Agent,
   type AgentFilter,
 } from '@/lib/agents'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon } from '@/lib/providerIcons'
 import { displayName, providerLabel, type Runtime } from '@/lib/runtimes'
@@ -25,6 +26,11 @@ const q = ref('')
 const filter = ref<AgentFilter>('mine')
 const err = ref('')
 const loading = ref(false)
+const busy = ref(false)
+
+type PendingAction = { type: 'archive' | 'delete'; agent: Agent } | null
+const pending = ref<PendingAction>(null)
+const ackDelete = ref(false)
 
 const email = computed(() => getSessionEmail())
 const ownerName = computed(() => ownerDisplayName(email.value))
@@ -109,40 +115,52 @@ function openAgent(a: Agent) {
 
 async function restoreAgent(a: Agent) {
   err.value = ''
+  busy.value = true
   try {
     await apiFetch(`/api/agents/${a.id}/restore`, { method: 'POST' })
     await load()
     filter.value = 'mine'
   } catch (e) {
     err.value = e instanceof Error ? e.message : '恢复失败'
+  } finally {
+    busy.value = false
   }
 }
 
-async function deleteAgent(a: Agent) {
-  const ok = confirm(
-    `永久删除智能体「${a.name}」？\n将抹去其全部 task、聊天等记录，不可恢复。\n若只需停用请改用归档。`,
-  )
-  if (!ok) return
-  err.value = ''
-  try {
-    await apiFetch(`/api/agents/${a.id}`, { method: 'DELETE' })
-    await load()
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : '删除失败'
-  }
+function askArchive(a: Agent) {
+  ackDelete.value = false
+  pending.value = { type: 'archive', agent: a }
 }
 
-async function archiveAgent(a: Agent) {
-  const ok = confirm(
-    `归档智能体「${a.name}」？\n归档后无法领取新任务，历史 task 保留，之后可恢复。`,
-  )
-  if (!ok) return
+function askDelete(a: Agent) {
+  ackDelete.value = false
+  pending.value = { type: 'delete', agent: a }
+}
+
+function closePending() {
+  if (busy.value) return
+  pending.value = null
+  ackDelete.value = false
+}
+
+async function confirmPending() {
+  if (!pending.value) return
+  const { type, agent: a } = pending.value
   err.value = ''
+  busy.value = true
   try {
-    await apiFetch(`/api/agents/${a.id}/archive`, { method: 'POST' })
+    if (type === 'archive') {
+      await apiFetch(`/api/agents/${a.id}/archive`, { method: 'POST' })
+    } else {
+      await apiFetch(`/api/agents/${a.id}`, { method: 'DELETE' })
+    }
+    pending.value = null
+    ackDelete.value = false
     await load()
   } catch (e) {
-    err.value = e instanceof Error ? e.message : '归档失败'
+    err.value = e instanceof Error ? e.message : type === 'archive' ? '归档失败' : '删除失败'
+  } finally {
+    busy.value = false
   }
 }
 
@@ -261,18 +279,46 @@ onMounted(load)
             <td class="num muted">—</td>
             <td class="col-actions" @click.stop>
               <template v-if="isArchived(a)">
-                <button type="button" class="link-btn" @click="restoreAgent(a)">恢复</button>
-                <button type="button" class="link-btn danger" @click="deleteAgent(a)">删除</button>
+                <button type="button" class="link-btn" :disabled="busy" @click="restoreAgent(a)">恢复</button>
+                <button type="button" class="link-btn danger" :disabled="busy" @click="askDelete(a)">删除</button>
               </template>
               <template v-else>
-                <button type="button" class="link-btn" @click="archiveAgent(a)">归档</button>
-                <button type="button" class="link-btn danger" @click="deleteAgent(a)">删除</button>
+                <button type="button" class="link-btn" :disabled="busy" @click="askArchive(a)">归档</button>
+                <button type="button" class="link-btn danger" :disabled="busy" @click="askDelete(a)">删除</button>
               </template>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <ConfirmDialog
+      v-if="pending?.type === 'archive'"
+      :open="true"
+      :title="`归档智能体「${pending.agent.name}」？`"
+      description="归档后无法领取新任务，历史 task 保留，之后可恢复。"
+      confirm-label="归档"
+      tone="warn"
+      :busy="busy"
+      @cancel="closePending"
+      @confirm="confirmPending"
+    />
+    <ConfirmDialog
+      v-else-if="pending?.type === 'delete'"
+      :open="true"
+      :title="`永久删除智能体「${pending.agent.name}」？`"
+      description="将抹去其全部 task、聊天等记录，不可恢复。"
+      callout="若只需停用，请改用「归档」——历史 task 会保留，之后可恢复。"
+      callout-tone="danger"
+      confirm-label="永久删除"
+      tone="danger"
+      :busy="busy"
+      require-ack
+      v-model:ack="ackDelete"
+      ack-label="我已了解：删除将永久抹去该智能体及相关记录。"
+      @cancel="closePending"
+      @confirm="confirmPending"
+    />
   </section>
 </template>
 

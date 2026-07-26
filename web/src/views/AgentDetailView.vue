@@ -14,6 +14,7 @@ import {
   type AgentDetailTab,
   type AgentSettingsSection,
 } from '@/lib/agents'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getCustomProviderIcon } from '@/lib/providerIcons'
 import {
@@ -46,9 +47,11 @@ const err = ref('')
 const saving = ref(false)
 const okMsg = ref('')
 const showMore = ref(false)
+const showArchive = ref(false)
 const showDelete = ref(false)
 const ackDelete = ref(false)
 const deleting = ref(false)
+const archiving = ref(false)
 let timer: number | undefined
 
 const agentId = computed(() => String(route.params.agentId || ''))
@@ -267,17 +270,30 @@ function goAssign() {
   router.push({ name: 'issues' })
 }
 
-async function archiveAgent() {
+function askArchive() {
   if (!agent.value || isArchived.value) return
-  if (!confirm(`归档智能体「${agent.value.name}」？\n归档后无法再领取新任务，历史 task 会保留，之后可恢复。`)) return
   showMore.value = false
+  showArchive.value = true
+}
+
+function closeArchive() {
+  if (archiving.value) return
+  showArchive.value = false
+}
+
+async function confirmArchive() {
+  if (!agent.value || isArchived.value) return
+  archiving.value = true
   err.value = ''
   try {
     const updated = await apiFetch<Agent>(`/api/agents/${agent.value.id}/archive`, { method: 'POST' })
     agent.value = updated
     okMsg.value = '已归档。可在列表「已归档」中恢复。'
+    showArchive.value = false
   } catch (e) {
     err.value = e instanceof Error ? e.message : '归档失败'
+  } finally {
+    archiving.value = false
   }
 }
 
@@ -296,6 +312,7 @@ async function restoreAgent() {
 
 function openDelete() {
   showMore.value = false
+  showArchive.value = false
   ackDelete.value = false
   err.value = ''
   showDelete.value = true
@@ -423,7 +440,7 @@ onUnmounted(() => {
           <button type="button" class="btn-icon" aria-label="更多" @click="showMore = !showMore">⋯</button>
           <div v-if="showMore" class="more-menu" @mouseleave="showMore = false">
             <button type="button" @click="setTab('settings'); showMore = false">设置</button>
-            <button v-if="!isArchived" type="button" @click="archiveAgent">归档</button>
+            <button v-if="!isArchived" type="button" @click="askArchive">归档</button>
             <button v-else type="button" @click="restoreAgent">恢复</button>
             <button type="button" class="danger" @click="openDelete">删除…</button>
           </div>
@@ -644,7 +661,7 @@ onUnmounted(() => {
               v-if="!isArchived"
               type="button"
               class="btn-warn"
-              @click="archiveAgent"
+              @click="askArchive"
             >归档智能体</button>
             <button
               v-else
@@ -671,33 +688,33 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="showDelete" class="modal-backdrop" @click.self="closeDelete">
-      <div class="modal">
-        <h3>永久删除智能体？</h3>
-        <p>
-          将删除「{{ agent.name }}」及其全部相关记录：task、聊天会话与消息、Skills 绑定；Issue 上的指派会被清空。此操作不可恢复。
-        </p>
-        <div class="callout danger">
-          若只需停用，请改用「归档」——历史 task 会保留，之后可恢复。
-        </div>
-        <label class="ack">
-          <input v-model="ackDelete" type="checkbox" :disabled="deleting" />
-          <span>我已了解：删除将永久抹去该智能体及相关记录。</span>
-        </label>
-        <p v-if="err" class="error">{{ err }}</p>
-        <div class="modal-actions">
-          <button type="button" class="btn-ghost" :disabled="deleting" @click="closeDelete">取消</button>
-          <button
-            type="button"
-            class="btn-del modal-del"
-            :disabled="deleting || !ackDelete"
-            @click="confirmDelete"
-          >
-            {{ deleting ? '删除中…' : '永久删除' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      :open="showArchive"
+      :title="`归档智能体「${agent.name}」？`"
+      description="归档后无法再领取新任务，历史 task 会保留，之后可恢复。"
+      confirm-label="归档"
+      tone="warn"
+      :busy="archiving"
+      @cancel="closeArchive"
+      @confirm="confirmArchive"
+    />
+    <ConfirmDialog
+      :open="showDelete"
+      :title="`永久删除智能体「${agent.name}」？`"
+      description="将删除该智能体及其全部相关记录：task、聊天会话与消息、Skills 绑定；Issue 上的指派会被清空。此操作不可恢复。"
+      callout="若只需停用，请改用「归档」——历史 task 会保留，之后可恢复。"
+      callout-tone="danger"
+      confirm-label="永久删除"
+      tone="danger"
+      :busy="deleting"
+      require-ack
+      v-model:ack="ackDelete"
+      ack-label="我已了解：删除将永久抹去该智能体及相关记录。"
+      @cancel="closeDelete"
+      @confirm="confirmDelete"
+    >
+      <p v-if="err" class="error dialog-err">{{ err }}</p>
+    </ConfirmDialog>
   </section>
 
   <section v-else class="page">
@@ -1098,47 +1115,7 @@ h1 { margin: 0; font-size: 24px; }
   cursor: pointer;
 }
 .btn-del:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 24px;
-}
-.modal {
-  width: min(440px, 100%);
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-}
-.modal h3 { margin: 0 0 8px; font-size: 17px; }
-.modal > p { font-size: 14px; line-height: 1.55; color: #374151; margin: 0 0 12px; }
-.callout.danger {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.45;
-  margin-bottom: 12px;
-}
-.ack {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: 13px;
-  line-height: 1.45;
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-.ack input { margin-top: 2px; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.modal-del { width: auto; }
+.dialog-err { margin: 0 0 8px; }
 
 @media (max-width: 900px) {
   .overview, .settings { grid-template-columns: 1fr; }
