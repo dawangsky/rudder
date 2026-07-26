@@ -1,13 +1,12 @@
 /**
  * 生成 100 张原创卡通 SVG 头像到 web/public/avatars/
- * 用法：node web/scripts/generate-agent-avatars.mjs
+ * 用法：npx tsx web/scripts/generate-agent-avatars.ts
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const outDir = path.join(__dirname, '../public/avatars')
+const outDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/avatars')
 
 const skins = ['#FFE0BD', '#FFD5A8', '#F5C6A0', '#E8B898', '#D4A574', '#C68642', '#FFCCBC', '#F8D5C2']
 const hairs = [
@@ -24,7 +23,7 @@ const bgs = [
   '#FFEBEE', '#E8EAF6', '#E0F2F1', '#FFFDE7', '#FBE9E7',
 ]
 
-function mulberry32(a) {
+function mulberry32(a: number) {
   return function () {
     let t = (a += 0x6d2b79f5)
     t = Math.imul(t ^ (t >>> 15), t | 1)
@@ -32,9 +31,9 @@ function mulberry32(a) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
-const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)]
+const pick = <T,>(rng: () => number, arr: T[]): T => arr[Math.floor(rng() * arr.length)]!
 
-function hairPath(style, color) {
+function hairPath(style: number, color: string): string {
   const paths = [
     `<ellipse cx="64" cy="52" rx="38" ry="36" fill="${color}"/><path d="M28 58 Q32 28 64 26 Q96 28 100 58 L96 70 Q64 40 32 70 Z" fill="${color}"/>`,
     `<path d="M26 50 Q30 22 64 20 Q98 22 102 50 L104 118 Q90 128 64 126 Q38 128 24 118 Z" fill="${color}"/><ellipse cx="64" cy="48" rx="36" ry="32" fill="${color}"/>`,
@@ -48,7 +47,7 @@ function hairPath(style, color) {
   return paths[style % paths.length]
 }
 
-function makeSvg(i) {
+function makeSvg(i: number): string {
   const rng = mulberry32(1000 + i * 97)
   const skin = pick(rng, skins)
   const hair = pick(rng, hairs)
@@ -94,7 +93,7 @@ function makeSvg(i) {
 }
 
 fs.mkdirSync(outDir, { recursive: true })
-const manifest = []
+const manifest: string[] = []
 for (let i = 1; i <= 100; i++) {
   const id = String(i).padStart(3, '0')
   const file = `chibi-${id}.svg`

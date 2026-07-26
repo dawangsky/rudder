@@ -1,0 +1,14 @@
+---
+description: 前端优先 TypeScript；能用 TS 就不用 JS
+globs: web/**/*.{ts,tsx,vue,js,mjs,cjs},desktop/**/*.{ts,js,mjs,cjs}
+alwaysApply: false
+---
+
+# 前端 TypeScript 优先
+
+- **能用 TypeScript 写的就不要用 JavaScript**（`web/`、`desktop/`）。
+- 新增前端代码默认 `.ts` / `.vue`（`<script setup lang="ts">`）；不要新增业务 `.js`。
+- 已有 JS 若可无痛改为 TS，应迁移；仅当运行时/工具链确无法用 TS 时保留 JS（并在旁注释原因）。
+- `web/`：Vite + Vue 业务与工具脚本用 TS（脚本可用 `tsx` 执行）。
+- `desktop/`：Electron 主进程 / preload / scripts 用 TS，经 `tsc` 编译到 `dist/` 再运行；不要改回手写 `main.js`。
+- 类型：优先显式类型与 `strict`；避免 `any`，除非对接无类型第三方时局部收窄。

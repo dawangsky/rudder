@@ -2,11 +2,20 @@
  * 确保 Electron 二进制完整（path.txt + Framework）。
  * 下载失败时请设置：export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
  */
-const fs = require('fs')
-const path = require('path')
-const { spawnSync } = require('child_process')
+import fs from 'fs'
+import path from 'path'
+import { spawnSync } from 'child_process'
 
-const electronDir = path.join(__dirname, '..', 'node_modules', 'electron')
+/** desktop/ 包根：兼容源码 scripts/ 与编译后 dist/scripts/ */
+function packageRoot(): string {
+  const here = __dirname
+  if (path.basename(path.dirname(here)) === 'dist') {
+    return path.resolve(here, '..', '..')
+  }
+  return path.resolve(here, '..')
+}
+
+const electronDir = path.join(packageRoot(), 'node_modules', 'electron')
 const pathFile = path.join(electronDir, 'path.txt')
 const bin = path.join(electronDir, 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
 const framework = path.join(
@@ -15,10 +24,10 @@ const framework = path.join(
   'Electron.app',
   'Contents',
   'Frameworks',
-  'Electron Framework.framework'
+  'Electron Framework.framework',
 )
 
-function ok() {
+function ok(): boolean {
   return fs.existsSync(pathFile) && fs.existsSync(bin) && fs.existsSync(framework)
 }
 
@@ -53,7 +62,7 @@ if (!ok()) {
     '[ensure-electron] Electron 仍不完整。请手动：\n' +
       '  export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/\n' +
       '  rm -rf node_modules/electron && npm install\n' +
-      '  或从缓存 unzip electron-v*-darwin-*.zip 到 node_modules/electron/dist'
+      '  或从缓存 unzip electron-v*-darwin-*.zip 到 node_modules/electron/dist',
   )
   process.exit(1)
 }

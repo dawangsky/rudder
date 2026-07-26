@@ -3,17 +3,33 @@
  * 确保 Desktop 使用的 daemon/rudder 与 daemon/VERSION 一致。
  * 版本落后、二进制缺失或源码比二进制新时自动 go build。
  */
-const { spawnSync } = require('child_process')
-const fs = require('fs')
-const path = require('path')
-const os = require('os')
+import { spawnSync } from 'child_process'
+import fs from 'fs'
+import path from 'path'
 
-const daemonDir = path.resolve(__dirname, '..', '..', 'daemon')
+/** desktop/ 包根：兼容源码 scripts/ 与编译后 dist/scripts/ */
+function packageRoot(): string {
+  const here = __dirname
+  if (path.basename(path.dirname(here)) === 'dist') {
+    return path.resolve(here, '..', '..')
+  }
+  return path.resolve(here, '..')
+}
+
+const daemonDir = path.resolve(packageRoot(), '..', 'daemon')
 const binaryPath = path.join(daemonDir, process.platform === 'win32' ? 'rudder.exe' : 'rudder')
 const versionFile = path.join(daemonDir, 'VERSION')
 const versionPkg = 'github.com/dawangsky/rudder/daemon/internal/version'
 
-function readExpectedVersion() {
+export type EnsureDaemonResult = {
+  ok: boolean
+  rebuilt: boolean
+  version: string
+  binary: string
+  message: string
+}
+
+function readExpectedVersion(): string {
   try {
     return fs.readFileSync(versionFile, 'utf8').trim()
   } catch {
@@ -21,7 +37,7 @@ function readExpectedVersion() {
   }
 }
 
-function readInstalledVersion() {
+function readInstalledVersion(): string | null {
   if (!fs.existsSync(binaryPath)) return null
   const r = spawnSync(binaryPath, ['version', '--json'], {
     encoding: 'utf8',
@@ -34,17 +50,17 @@ function readInstalledVersion() {
     return m ? m[1] : null
   }
   try {
-    return JSON.parse(String(r.stdout || '{}')).version || null
+    return (JSON.parse(String(r.stdout || '{}')) as { version?: string }).version || null
   } catch {
     return null
   }
 }
 
-function latestSourceMtime(dir) {
+function latestSourceMtime(dir: string): number {
   let latest = 0
   const skip = new Set(['rudder', 'rudder.exe', '.git'])
-  function walk(d) {
-    let entries
+  function walk(d: string) {
+    let entries: fs.Dirent[]
     try {
       entries = fs.readdirSync(d, { withFileTypes: true })
     } catch {
@@ -70,7 +86,7 @@ function latestSourceMtime(dir) {
   return latest
 }
 
-function needsRebuild(expected, installed) {
+function needsRebuild(expected: string, installed: string | null): { yes: boolean; reason: string } {
   if (!fs.existsSync(binaryPath)) {
     return { yes: true, reason: '二进制不存在' }
   }
@@ -89,7 +105,7 @@ function needsRebuild(expected, installed) {
   return { yes: false, reason: '' }
 }
 
-function buildDaemon(expected) {
+function buildDaemon(expected: string) {
   const ldflags = `-X ${versionPkg}.Version=${expected} -X ${versionPkg}.BuiltAt=${new Date().toISOString()}`
   const args = ['build', `-ldflags=${ldflags}`, '-o', binaryPath, './cmd/rudder']
   const r = spawnSync('go', args, {
@@ -106,10 +122,7 @@ function buildDaemon(expected) {
   }
 }
 
-/**
- * @returns {{ ok: boolean, rebuilt: boolean, version: string, binary: string, message: string }}
- */
-function ensureDaemon() {
+export function ensureDaemon(): EnsureDaemonResult {
   const expected = readExpectedVersion()
   if (!expected) {
     return {
@@ -153,20 +166,21 @@ function ensureDaemon() {
       message: `已将 Daemon 升级到 ${expected}`,
     }
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
     return {
       ok: false,
       rebuilt: false,
       version: installed || '',
       binary: binaryPath,
-      message: `自动编译 Daemon 失败：${e.message || e}。请在 daemon/ 下执行 go build -o rudder ./cmd/rudder`,
+      message: `自动编译 Daemon 失败：${msg}。请在 daemon/ 下执行 go build -o rudder ./cmd/rudder`,
     }
   }
 }
+
+export { binaryPath, readExpectedVersion }
 
 if (require.main === module) {
   const result = ensureDaemon()
   console.log(result.message)
   process.exit(result.ok ? 0 : 1)
 }
-
-module.exports = { ensureDaemon, binaryPath, readExpectedVersion }
