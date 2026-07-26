@@ -71,6 +71,7 @@ public class OrchestrationService {
         Long agentId = asLong(body.get("agentId"));
         if (agentId == null) throw new IllegalArgumentException("必须选择 Agent");
         AgentEntity agent = resourceService.requireAgent(p, agentId);
+        resourceService.assertAgentActive(agent);
         Long projectId = asLong(body.get("projectId"));
         if (projectId != null) resourceService.requireProject(p, projectId);
 
@@ -320,6 +321,7 @@ public class OrchestrationService {
     // ===== Task =====
     public TaskEntity enqueueTask(AuthPrincipal p, AgentEntity agent, String trigger, String prompt,
                                   Long projectId, Long issueId, Long chatSessionId, Long chatMessageId) {
+        resourceService.assertAgentActive(agent);
         TaskEntity task = new TaskEntity();
         task.setWorkspaceId(p.workspaceId());
         task.setAgentId(agent.getId());
@@ -400,6 +402,13 @@ public class OrchestrationService {
         AgentEntity agent = resourceService.requireAgent(
                 new AuthPrincipal(daemon.userId(), daemon.email(), "session", daemon.workspaceId()),
                 task.getAgentId());
+        if ("archived".equalsIgnoreCase(agent.getStatus())) {
+            task.setStatus(TaskStatuses.CANCELLED);
+            task.setFinishedAt(LocalDateTime.now());
+            task.setUpdatedAt(LocalDateTime.now());
+            taskMapper.updateById(task);
+            return Map.of("task", (Object) null);
+        }
         // 已绑定其它 runtime 的任务不领；未绑定则要求 provider 匹配（stub 例外）
         if (task.getRuntimeId() != null && !Objects.equals(task.getRuntimeId(), runtimeId)) {
             return Map.of("task", (Object) null);

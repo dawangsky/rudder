@@ -12,6 +12,7 @@ import {
   getCustomProviderIcon,
   setCustomProviderIcon,
 } from '@/lib/providerIcons'
+import { ownerDisplayName, ownerInitials } from '@/lib/agents'
 import { getSessionEmail } from '@/lib/session'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import {
@@ -26,6 +27,13 @@ type Agent = {
   name: string
   provider: string
   runtimeId?: string | null
+  status?: string
+}
+
+type Task = {
+  id: string
+  agentId: string
+  status: string
 }
 
 const route = useRoute()
@@ -33,9 +41,11 @@ const router = useRouter()
 
 const runtime = ref<Runtime | null>(null)
 const agents = ref<Agent[]>([])
+const tasks = ref<Task[]>([])
 const localDaemonId = ref('')
 const removing = ref(false)
 const showDelete = ref(false)
+const ackDelete = ref(false)
 const daemonRunning = ref(false)
 const err = ref('')
 const iconErr = ref('')
@@ -56,11 +66,12 @@ function reloadCustomIcon() {
 
 watch(runtime, reloadCustomIcon, { immediate: true })
 
+/** 依赖本运行时、且尚未归档的智能体（按 runtimeId 绑定）。 */
 const boundAgents = computed(() =>
   agents.value.filter(
     (a) =>
-      (a.runtimeId && a.runtimeId === runtimeId.value) ||
-      (!a.runtimeId && runtime.value && a.provider === runtime.value.provider),
+      a.runtimeId === runtimeId.value &&
+      (a.status || '').toLowerCase() !== 'archived',
   ),
 )
 
@@ -68,12 +79,40 @@ const isLocal = computed(
   () => !!(runtime.value?.daemonId && localDaemonId.value && runtime.value.daemonId === localDaemonId.value),
 )
 
-const ownerName = computed(() => {
-  const e = getSessionEmail()
-  if (!e) return '—'
-  const at = e.indexOf('@')
-  return at > 0 ? e.slice(0, at) : e
+const email = computed(() => getSessionEmail())
+const ownerName = computed(() => ownerDisplayName(email.value))
+const ownerAv = computed(() => ownerInitials(email.value))
+
+const deleteAgentCount = computed(() => boundAgents.value.length)
+
+const activeTaskCountByAgent = computed(() => {
+  const m = new Map<string, number>()
+  for (const t of tasks.value) {
+    if (['completed', 'failed', 'cancelled'].includes((t.status || '').toLowerCase())) continue
+    m.set(t.agentId, (m.get(t.agentId) || 0) + 1)
+  }
+  return m
 })
+
+function agentTaskLabel(agentId: string) {
+  const n = activeTaskCountByAgent.value.get(agentId) || 0
+  if (n <= 0) return '空闲'
+  return `排队中 ${n}`
+}
+
+function openDelete() {
+  err.value = ''
+  ackDelete.value = false
+  showDelete.value = true
+  loadTasks()
+}
+
+function closeDelete() {
+  if (removing.value) return
+  showDelete.value = false
+  ackDelete.value = false
+  err.value = ''
+}
 
 async function load() {
   const list = await apiFetch<Runtime[]>('/api/runtimes')
@@ -82,6 +121,14 @@ async function load() {
     agents.value = await apiFetch('/api/agents')
   } catch {
     agents.value = []
+  }
+}
+
+async function loadTasks() {
+  try {
+    tasks.value = await apiFetch<Task[]>('/api/tasks')
+  } catch {
+    tasks.value = []
   }
 }
 
@@ -128,13 +175,15 @@ function resetIcon() {
 
 async function confirmDelete() {
   if (!runtime.value) return
+  if (deleteAgentCount.value > 0 && !ackDelete.value) return
   removing.value = true
   err.value = ''
   try {
     const r = runtime.value
     const host = getHostBridge()
-    // 本机先走 CLI remove；内置 Provider 若仍安装，Daemon 约 10s 内会自动探测并重新注册
+    // 本机先走 CLI remove；服务端删除时会归档绑定智能体并取消进行中 task
     if (isLocal.value) {
+      // CLI remove → 服务端 DeleteRuntimeByProvider（归档绑定智能体并取消 task）
       const removed = await host.removeRuntime(r.provider)
       if (!removed.ok) {
         err.value = removed.message || '本机移除失败，删除已中止'
@@ -163,6 +212,7 @@ async function confirmDelete() {
   } finally {
     removing.value = false
     showDelete.value = false
+    ackDelete.value = false
   }
 }
 
@@ -284,23 +334,102 @@ onUnmounted(() => {
             <span class="vis active">私有</span>
             <span class="vis disabled" title="二期">公开</span>
           </div>
-          <button type="button" class="btn-del" @click="showDelete = true">删除运行时</button>
+          <button type="button" class="btn-del" @click="openDelete">删除运行时</button>
         </div>
       </aside>
     </div>
 
-    <div v-if="showDelete" class="modal-backdrop" @click.self="showDelete = false">
-      <div class="modal">
-        <h3>删除运行时？</h3>
-        <p>确定要删除「{{ runtimeTitle(runtime) }}」吗？</p>
-        <div v-if="isLocal" class="callout">
-          内置运行时（Cursor / Claude Code / Codex）若本机仍安装对应 CLI，Daemon 轮询探测后会自动再次出现。彻底消失请卸载 CLI 或移出 PATH。
+    <div v-if="showDelete" class="modal-backdrop" @click.self="closeDelete">
+      <div class="modal" :class="{ wide: deleteAgentCount > 0 }">
+        <h3 v-if="deleteAgentCount > 0">
+          归档 {{ deleteAgentCount }} 个智能体并删除该运行时？
+        </h3>
+        <h3 v-else>删除该运行时？</h3>
+
+        <p v-if="deleteAgentCount > 0">
+          删除「{{ runtimeTitle(runtime) }}」。下列智能体将被归档并从可用工作流中移除，其排队中或运行中的 task 会被取消，随后运行时本身会被删除。
+        </p>
+        <p v-else>确定要删除「{{ runtimeTitle(runtime) }}」吗？</p>
+
+        <div v-if="isLocal && daemonRunning" class="callout warn">
+          <span class="callout-icon" aria-hidden="true">ℹ</span>
+          <span>
+            该运行时由正在运行的本地守护进程托管。删除会成功，但守护进程会在数秒内重新注册一个新的运行时——若想彻底移除，请先停止守护进程。
+          </span>
         </div>
+        <div v-else-if="isLocal" class="callout warn">
+          <span class="callout-icon" aria-hidden="true">ℹ</span>
+          <span>
+            内置运行时（Cursor / Claude Code / Codex）若本机仍安装对应 CLI，Daemon 轮询探测后会自动再次出现。彻底消失请卸载 CLI、移出 PATH，或先停止守护进程。
+          </span>
+        </div>
+
+        <div v-if="deleteAgentCount > 0" class="callout danger">
+          <span class="callout-icon" aria-hidden="true">⚠</span>
+          <span>
+            此操作具有破坏性。归档的智能体将从可用工作流中移除，其排队中或运行中的 task 会被取消。
+          </span>
+        </div>
+
+        <div v-if="deleteAgentCount > 0" class="dep-table-wrap">
+          <table class="dep-table">
+            <thead>
+              <tr>
+                <th>智能体</th>
+                <th>所有者</th>
+                <th>状态</th>
+                <th>可见性</th>
+                <th>模型</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="a in boundAgents" :key="a.id">
+                <td>
+                  <span class="agent-cell">
+                    <ProviderIcon :provider="a.provider" :size="18" />
+                    {{ a.name }}
+                  </span>
+                </td>
+                <td>
+                  <span class="owner-cell">
+                    <span class="av">{{ ownerAv }}</span>
+                    你
+                  </span>
+                </td>
+                <td>
+                  <span class="task-status" :class="{ busy: (activeTaskCountByAgent.get(a.id) || 0) > 0 }">
+                    <i class="dot" />
+                    {{ agentTaskLabel(a.id) }}
+                  </span>
+                </td>
+                <td><span class="vis-cell">🔒 私有</span></td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <label v-if="deleteAgentCount > 0" class="ack">
+          <input v-model="ackDelete" type="checkbox" :disabled="removing" />
+          <span>
+            我已了解：这 {{ deleteAgentCount }} 个智能体将被归档，其排队中或运行中的 task 会被取消。
+          </span>
+        </label>
+
         <p v-if="err" class="error">{{ err }}</p>
         <div class="modal-actions">
-          <button type="button" class="mini" :disabled="removing" @click="showDelete = false">取消</button>
-          <button type="button" class="btn-del" :disabled="removing" @click="confirmDelete">
-            {{ removing ? '删除中…' : '删除运行时' }}
+          <button type="button" class="mini" :disabled="removing" @click="closeDelete">取消</button>
+          <button
+            type="button"
+            class="btn-del modal-del"
+            :disabled="removing || (deleteAgentCount > 0 && !ackDelete)"
+            @click="confirmDelete"
+          >
+            <template v-if="removing">处理中…</template>
+            <template v-else-if="deleteAgentCount > 0">
+              归档 {{ deleteAgentCount }} 个智能体并删除运行时
+            </template>
+            <template v-else>删除运行时</template>
           </button>
         </div>
       </div>
@@ -389,6 +518,7 @@ h1 { margin: 0; font-size: 24px; }
   height: 8px;
   border-radius: 50%;
   background: #d1d5db;
+  display: inline-block;
 }
 .dot.on { background: #22c55e; }
 
@@ -493,6 +623,10 @@ h1 { margin: 0; font-size: 24px; }
   font-weight: 600;
   font-size: 13px;
 }
+.btn-del:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .mini {
   border: 1px solid var(--border);
   background: #fff;
@@ -516,20 +650,114 @@ h1 { margin: 0; font-size: 24px; }
   background: #fff;
   border-radius: 12px;
   padding: 20px;
+  max-height: min(90vh, 720px);
+  overflow: auto;
 }
-.modal h3 { margin: 0 0 8px; }
-.modal p { font-size: 14px; line-height: 1.5; }
+.modal.wide { width: min(640px, 100%); }
+.modal h3 { margin: 0 0 8px; font-size: 18px; }
+.modal > p { font-size: 14px; line-height: 1.55; color: #374151; margin: 0 0 12px; }
 .callout {
-  background: #fffbeb;
-  border: 1px solid #f6d98a;
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 13px;
-  color: #78350f;
-  margin: 12px 0;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
 }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.callout-icon { flex-shrink: 0; line-height: 1.4; }
+.callout.warn {
+  background: #fffbeb;
+  border: 1px solid #f6d98a;
+  color: #78350f;
+}
+.callout.danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.dep-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+  margin-bottom: 14px;
+}
+.dep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.dep-table th {
+  text-align: left;
+  padding: 10px 12px;
+  background: #f9fafb;
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.dep-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.dep-table tr:last-child td { border-bottom: none; }
+.agent-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.owner-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.av {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.task-status.busy { color: #059669; }
+.task-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d1d5db;
+}
+.task-status.busy .dot { background: #10b981; }
+.vis-cell { color: var(--muted); }
+
+.ack {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.ack input { margin-top: 2px; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.modal-del { width: auto; padding: 8px 14px; }
 .error { color: var(--danger); }
+.muted { color: var(--muted); }
 
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }

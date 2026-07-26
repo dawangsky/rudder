@@ -49,6 +49,7 @@ export function formatRelative(iso?: string) {
 }
 
 export function agentStatusLabel(status?: string, runtimeOnline?: boolean) {
+  if ((status || '').toLowerCase() === 'archived') return '已归档'
   if (runtimeOnline === false) return '离线'
   if (status === 'busy' || status === 'running') return '忙碌'
   if (runtimeOnline === true || status === 'idle' || status === 'online') return '在线'

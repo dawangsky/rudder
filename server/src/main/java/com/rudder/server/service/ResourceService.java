@@ -8,12 +8,14 @@ import com.rudder.server.domain.InboxEntity;
 import com.rudder.server.domain.ProjectEntity;
 import com.rudder.server.domain.RuntimeEntity;
 import com.rudder.server.domain.SkillEntity;
+import com.rudder.server.domain.TaskEntity;
 import com.rudder.server.mapper.AgentMapper;
 import com.rudder.server.mapper.AgentSkillMapper;
 import com.rudder.server.mapper.InboxMapper;
 import com.rudder.server.mapper.ProjectMapper;
 import com.rudder.server.mapper.RuntimeMapper;
 import com.rudder.server.mapper.SkillMapper;
+import com.rudder.server.mapper.TaskMapper;
 import com.rudder.server.ws.NettyWsHub;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,6 +39,7 @@ public class ResourceService {
     private final AgentSkillMapper agentSkillMapper;
     private final ProjectMapper projectMapper;
     private final RuntimeMapper runtimeMapper;
+    private final TaskMapper taskMapper;
     private final InboxMapper inboxMapper;
     private final NettyWsHub wsHub;
 
@@ -109,6 +112,13 @@ public class ResourceService {
             a.setProvider(provider.toLowerCase());
         }
         if (body.containsKey("runtimeId")) a.setRuntimeId(asLong(body.get("runtimeId")));
+        if (body.containsKey("status")) {
+            String status = str(body.get("status")).toLowerCase();
+            if (!StringUtils.hasText(status)) {
+                throw new IllegalArgumentException("状态不能为空");
+            }
+            a.setStatus(status);
+        }
         if (body.containsKey("skillIds")) {
             agentSkillMapper.delete(new LambdaQueryWrapper<AgentSkillEntity>().eq(AgentSkillEntity::getAgentId, id));
             bindSkills(id, body.get("skillIds"));
@@ -116,6 +126,13 @@ public class ResourceService {
         a.setUpdatedAt(LocalDateTime.now());
         agentMapper.updateById(a);
         return agentView(a);
+    }
+
+    /** 已归档智能体不可再入队 / 开聊。 */
+    public void assertAgentActive(AgentEntity a) {
+        if (a != null && "archived".equalsIgnoreCase(a.getStatus())) {
+            throw new IllegalArgumentException("智能体已归档，无法使用");
+        }
     }
 
     public void deleteAgent(AuthPrincipal p, Long id) {
@@ -296,8 +313,44 @@ public class ResourceService {
         if (r == null || !Objects.equals(r.getWorkspaceId(), p.workspaceId())) {
             throw new IllegalArgumentException("运行时不存在");
         }
+        archiveAgentsBoundToRuntime(p, r.getId());
         runtimeMapper.deleteById(id);
         wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(id)));
+    }
+
+    /**
+     * 删除运行时前：归档绑定该 runtime 的智能体，并取消其排队中/运行中的 task。
+     */
+    private void archiveAgentsBoundToRuntime(AuthPrincipal p, Long runtimeId) {
+        if (runtimeId == null) return;
+        List<AgentEntity> agents = agentMapper.selectList(new LambdaQueryWrapper<AgentEntity>()
+                .eq(AgentEntity::getWorkspaceId, p.workspaceId())
+                .eq(AgentEntity::getRuntimeId, runtimeId)
+                .and(w -> w.isNull(AgentEntity::getStatus)
+                        .or()
+                        .ne(AgentEntity::getStatus, "archived")));
+        LocalDateTime now = LocalDateTime.now();
+        for (AgentEntity a : agents) {
+            a.setStatus("archived");
+            a.setUpdatedAt(now);
+            agentMapper.updateById(a);
+            List<TaskEntity> tasks = taskMapper.selectList(new LambdaQueryWrapper<TaskEntity>()
+                    .eq(TaskEntity::getWorkspaceId, p.workspaceId())
+                    .eq(TaskEntity::getAgentId, a.getId()));
+            for (TaskEntity t : tasks) {
+                if (TaskStatuses.isTerminal(t.getStatus())) continue;
+                t.setStatus(TaskStatuses.CANCELLED);
+                t.setFinishedAt(now);
+                t.setUpdatedAt(now);
+                taskMapper.updateById(t);
+                wsHub.publish(p.workspaceId(), Map.of("type", "task.updated", "task", Map.of(
+                        "id", String.valueOf(t.getId()),
+                        "agentId", String.valueOf(t.getAgentId()),
+                        "status", t.getStatus()
+                )));
+            }
+            wsHub.publish(p.workspaceId(), Map.of("type", "agent.updated", "agent", agentView(a)));
+        }
     }
 
     /**
@@ -332,6 +385,7 @@ public class ResourceService {
         }
         List<RuntimeEntity> list = runtimeMapper.selectList(q);
         for (RuntimeEntity r : list) {
+            archiveAgentsBoundToRuntime(p, r.getId());
             runtimeMapper.deleteById(r.getId());
             wsHub.publish(p.workspaceId(), Map.of("type", "runtime.deleted", "id", String.valueOf(r.getId())));
         }

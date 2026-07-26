@@ -55,10 +55,15 @@ function statusOf(a: Agent) {
   return agentStatusLabel(a.status, rt ? rt.status === 'online' : undefined)
 }
 
+function isArchived(a: Agent) {
+  return (a.status || '').toLowerCase() === 'archived'
+}
+
+const activeAgents = computed(() => agents.value.filter((a) => !isArchived(a)))
+const archivedAgents = computed(() => agents.value.filter(isArchived))
+
 const filtered = computed(() => {
-  let list = agents.value
-  // MVP：无归档字段；已归档恒为空。全部/我的均展示工作区智能体（单人工作区）
-  if (filter.value === 'archived') return []
+  let list = filter.value === 'archived' ? archivedAgents.value : activeAgents.value
   const s = q.value.trim().toLowerCase()
   if (s) {
     list = list.filter(
@@ -72,9 +77,9 @@ const filtered = computed(() => {
 })
 
 const counts = computed(() => ({
-  mine: agents.value.length,
-  all: agents.value.length,
-  archived: 0,
+  mine: activeAgents.value.length,
+  all: activeAgents.value.length,
+  archived: archivedAgents.value.length,
 }))
 
 async function load() {

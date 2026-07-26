@@ -7,7 +7,7 @@ import { useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import { formatRelative } from '@/lib/agents'
 
-type Agent = { id: string; name: string; provider?: string }
+type Agent = { id: string; name: string; provider?: string; status?: string }
 type Session = {
   id: string
   title: string
@@ -39,9 +39,13 @@ const current = computed(() => sessions.value.find((s) => s.id === currentId.val
 const composerDisabled = computed(() => !hasAgents.value || !currentId.value || sending.value)
 
 async function load() {
-  agents.value = await apiFetch('/api/agents')
+  const all = await apiFetch<Agent[]>('/api/agents')
+  agents.value = all.filter((a) => (a.status || '').toLowerCase() !== 'archived')
   sessions.value = await apiFetch('/api/chats')
   projects.value = await apiFetch('/api/projects')
+  if (agentId.value && !agents.value.some((a) => a.id === agentId.value)) {
+    agentId.value = ''
+  }
   if (!agentId.value && agents.value.length) agentId.value = agents.value[0].id
   if (currentId.value && !sessions.value.some((s) => s.id === currentId.value)) {
     currentId.value = ''
