@@ -4,13 +4,12 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import ProviderIcon from '@/components/ProviderIcon.vue'
+import AgentAvatar from '@/components/AgentAvatar.vue'
 import {
   agentDetailStatus,
   ownerDisplayName,
   type Agent,
 } from '@/lib/agents'
-import { getCustomProviderIcon } from '@/lib/providerIcons'
 import { displayName, type Runtime } from '@/lib/runtimes'
 import { getSessionEmail } from '@/lib/session'
 
@@ -137,11 +136,7 @@ onUnmounted(() => {
       @mouseleave="onLeave"
       @click="goAgent(a)"
     >
-      <ProviderIcon
-        :provider="a.provider"
-        :custom-src="getCustomProviderIcon(runtime.daemonId, a.provider)"
-        :size="22"
-      />
+      <AgentAvatar :src="a.avatar" :provider="a.provider" :size="22" :rounded="999" />
     </button>
     <span v-if="extra > 0" class="more">+{{ extra }}</span>
 
@@ -156,11 +151,7 @@ onUnmounted(() => {
       >
         <div class="tip-head">
           <span class="tip-av">
-            <ProviderIcon
-              :provider="hoverAgent.provider"
-              :custom-src="getCustomProviderIcon(runtime.daemonId, hoverAgent.provider)"
-              :size="28"
-            />
+            <AgentAvatar :src="hoverAgent.avatar" :provider="hoverAgent.provider" :size="28" :rounded="8" />
           </span>
           <div class="tip-title">
             <div class="name-row">

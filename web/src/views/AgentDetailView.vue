@@ -16,8 +16,9 @@ import {
 } from '@/lib/agents'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ActionIcon from '@/components/ActionIcon.vue'
-import ProviderIcon from '@/components/ProviderIcon.vue'
-import { getCustomProviderIcon } from '@/lib/providerIcons'
+import AgentAvatar from '@/components/AgentAvatar.vue'
+import AvatarPicker from '@/components/AvatarPicker.vue'
+import { pickRandomAvatar } from '@/lib/agentAvatars'
 import {
   displayName,
   providerLabel,
@@ -77,11 +78,13 @@ const ownerAv = computed(() => ownerInitials(email.value))
 const form = ref({
   name: '',
   description: '',
+  avatar: '',
   instructions: '',
   runtimeId: '',
   maxConcurrency: 1,
   skillIds: [] as string[],
 })
+const showAvatarPicker = ref(false)
 
 const runtime = computed(() => {
   if (!agent.value) return undefined
@@ -168,6 +171,7 @@ function syncForm(a: Agent) {
   form.value = {
     name: a.name || '',
     description: a.description || '',
+    avatar: a.avatar || '',
     instructions: a.instructions || '',
     runtimeId: a.runtimeId || '',
     maxConcurrency: a.maxConcurrency ?? 1,
@@ -214,6 +218,7 @@ async function saveGeneral() {
     const body: Record<string, unknown> = {
       name: form.value.name.trim(),
       description: form.value.description.trim().slice(0, 255),
+      avatar: form.value.avatar || '',
       instructions: form.value.instructions,
       maxConcurrency: conc,
       skillIds: form.value.skillIds,
@@ -387,12 +392,8 @@ onUnmounted(() => {
 
     <header class="hero">
       <div class="hero-left">
-        <div class="avatar">
-          <ProviderIcon
-            :provider="agent.provider"
-            :custom-src="getCustomProviderIcon(runtime?.daemonId, agent.provider)"
-            :size="52"
-          />
+        <div class="avatar" @click="!isArchived && (showAvatarPicker = true)" :class="{ clickable: !isArchived }">
+          <AgentAvatar :src="form.avatar || agent.avatar" :provider="agent.provider" :size="56" />
         </div>
         <div class="hero-text">
           <div class="title-row">
@@ -616,8 +617,19 @@ onUnmounted(() => {
 
           <div class="field-row avatar-row">
             <span class="label">头像</span>
-            <div class="avatar sm">
-              <ProviderIcon :provider="agent.provider" :size="40" />
+            <div class="avatar-edit">
+              <AgentAvatar :src="form.avatar" :provider="agent.provider" :size="48" />
+              <button type="button" class="btn-ghost" :disabled="isArchived" @click="showAvatarPicker = true">
+                更换
+              </button>
+              <button
+                type="button"
+                class="btn-ghost"
+                :disabled="isArchived"
+                @click="form.avatar = pickRandomAvatar(form.avatar)"
+              >
+                随机
+              </button>
             </div>
           </div>
           <label class="field">
@@ -719,6 +731,8 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <AvatarPicker v-model="form.avatar" v-model:open="showAvatarPicker" />
+
     <ConfirmDialog
       :open="showArchive"
       :title="`归档智能体「${agent.name}」？`"
@@ -788,6 +802,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.avatar.clickable { cursor: pointer; }
+.avatar.clickable:hover { box-shadow: 0 0 0 2px #d1d5db; }
+.avatar-edit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .avatar.sm { width: 44px; height: 44px; border-radius: 12px; }
 .title-row {

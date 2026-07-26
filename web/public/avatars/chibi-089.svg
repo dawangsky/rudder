@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="agent avatar 89">
+  <rect width="128" height="128" rx="28" fill="#FFFDE7"/>
+  <ellipse cx="64" cy="118" rx="34" ry="14" fill="#4a3728"/>
+  <circle cx="64" cy="78" r="36" fill="#F8D5C2"/>
+  <ellipse cx="64" cy="52" rx="38" ry="36" fill="#ff5722"/><path d="M28 58 Q32 28 64 26 Q96 28 100 58 L96 70 Q64 40 32 70 Z" fill="#ff5722"/>
+  <!-- bangs overlay -->
+  <path d="M34 58 Q48 42 64 44 Q80 42 94 58 Q78 50 64 52 Q50 50 34 58 Z" fill="#ff5722" opacity="0.95"/>
+  
+      <ellipse cx="50" cy="72" rx="8" ry="10" fill="#fff"/><ellipse cx="78" cy="72" rx="8" ry="10" fill="#fff"/>
+      <ellipse cx="51" cy="73" rx="3.5" ry="5" fill="#00695c"/><ellipse cx="79" cy="73" rx="3.5" ry="5" fill="#00695c"/>
+      <circle cx="52" cy="71" r="1.2" fill="#fff"/><circle cx="80" cy="71" r="1.2" fill="#fff"/>
+  
+  <ellipse cx="42" cy="84" rx="7" ry="4" fill="#ff8a80" opacity="0.45"/><ellipse cx="86" cy="84" rx="7" ry="4" fill="#ff8a80" opacity="0.45"/>
+  
+  <path d="M58 91 Q64 96 70 91" fill="none" stroke="#c47a6a" stroke-width="2" stroke-linecap="round"/><path d="M60 94 Q64 99 68 94" fill="#e8917a"/>
+  <!-- nose tip -->
+  <ellipse cx="64" cy="82" rx="1.6" ry="1.1" fill="#e0a090" opacity="0.55"/>
+  <!-- highlight -->
+  <ellipse cx="48" cy="58" rx="8" ry="5" fill="#b2dfdb" opacity="0.25"/>
+</svg>

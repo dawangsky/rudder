@@ -6,6 +6,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import ProviderIcon from '@/components/ProviderIcon.vue'
+import AgentAvatar from '@/components/AgentAvatar.vue'
+import AvatarPicker from '@/components/AvatarPicker.vue'
+import { pickRandomAvatar } from '@/lib/agentAvatars'
 import { PROVIDERS, baseProviderOf, displayName, type Runtime } from '@/lib/runtimes'
 
 const route = useRoute()
@@ -17,10 +20,12 @@ const runtimes = ref<Runtime[]>([])
 const skills = ref<{ id: string; name: string }[]>([])
 const err = ref('')
 const saving = ref(false)
+const showAvatarPicker = ref(false)
 
 const form = ref({
   name: '',
   description: '',
+  avatar: pickRandomAvatar(),
   provider: 'cursor',
   runtimeId: '' as string,
   instructions: '',
@@ -67,6 +72,7 @@ function goStart() {
 
 function goBlank() {
   err.value = ''
+  form.value.avatar = pickRandomAvatar()
   router.push({ name: 'agent-create-blank' })
 }
 
@@ -99,6 +105,7 @@ async function create() {
       body: JSON.stringify({
         name: form.value.name.trim(),
         description: form.value.description.trim(),
+        avatar: form.value.avatar || pickRandomAvatar(),
         provider,
         runtimeId: form.value.runtimeId || undefined,
         instructions: form.value.instructions,
@@ -168,6 +175,19 @@ onMounted(load)
         当前没有在线运行时。请先到「运行时」确认 Cursor / Claude / Codex 已探测并在线。
       </p>
 
+      <div class="field avatar-field">
+        <span class="label">头像</span>
+        <div class="avatar-row">
+          <AgentAvatar :src="form.avatar" :provider="form.provider" :size="56" />
+          <div class="avatar-actions">
+            <button type="button" class="btn-ghost" @click="showAvatarPicker = true">更换头像</button>
+            <button type="button" class="btn-ghost" @click="form.avatar = pickRandomAvatar(form.avatar)">
+              随机换一张
+            </button>
+          </div>
+        </div>
+      </div>
+
       <label class="field">
         名称
         <input v-model="form.name" type="text" placeholder="例如：前端工程师" />
@@ -236,6 +256,8 @@ onMounted(load)
         </button>
       </div>
     </div>
+
+    <AvatarPicker v-model="form.avatar" v-model:open="showAvatarPicker" />
   </section>
 </template>
 
@@ -360,6 +382,25 @@ h2 { margin: 0; font-size: 22px; }
   font-size: 13px;
 }
 .label { font-size: 13px; }
+.avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-ghost {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-ghost:hover { background: #f9fafb; }
 .field input,
 .field select,
 .field textarea {

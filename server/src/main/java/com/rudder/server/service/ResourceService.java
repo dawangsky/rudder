@@ -73,7 +73,11 @@ public class ResourceService {
         AgentEntity a = new AgentEntity();
         a.setWorkspaceId(p.workspaceId());
         a.setName(require(body.get("name"), "名称不能为空"));
-        a.setAvatar(str(body.get("avatar")));
+        String avatar = str(body.get("avatar"));
+        if (avatar.length() > 512) {
+            throw new IllegalArgumentException("头像地址过长");
+        }
+        a.setAvatar(avatar);
         a.setDescription(str(body.get("description")));
         a.setInstructions(str(body.get("instructions")));
         a.setProvider(provider.toLowerCase());
@@ -115,6 +119,13 @@ public class ResourceService {
     public Map<String, Object> updateAgent(AuthPrincipal p, Long id, Map<String, Object> body) {
         AgentEntity a = requireAgent(p, id);
         if (body.containsKey("name")) a.setName(require(body.get("name"), "名称不能为空"));
+        if (body.containsKey("avatar")) {
+            String avatar = str(body.get("avatar"));
+            if (avatar.length() > 512) {
+                throw new IllegalArgumentException("头像地址过长");
+            }
+            a.setAvatar(avatar);
+        }
         if (body.containsKey("instructions")) a.setInstructions(str(body.get("instructions")));
         if (body.containsKey("description")) a.setDescription(str(body.get("description")));
         if (body.containsKey("provider")) {

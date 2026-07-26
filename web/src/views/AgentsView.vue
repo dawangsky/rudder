@@ -16,8 +16,7 @@ import {
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import ActionIcon from '@/components/ActionIcon.vue'
-import ProviderIcon from '@/components/ProviderIcon.vue'
-import { getCustomProviderIcon } from '@/lib/providerIcons'
+import AgentAvatar from '@/components/AgentAvatar.vue'
 import { displayName, providerLabel, type Runtime } from '@/lib/runtimes'
 import { getSessionEmail } from '@/lib/session'
 
@@ -254,13 +253,12 @@ onMounted(load)
             <td>
               <div class="agent-cell">
                 <span class="agent-av" aria-hidden="true">
-                  <ProviderIcon
-                    v-if="a.provider"
+                  <AgentAvatar
+                    :src="a.avatar"
                     :provider="a.provider"
-                    :custom-src="getCustomProviderIcon(runtimeFor(a)?.daemonId, a.provider)"
-                    :size="28"
+                    :size="32"
+                    :rounded="8"
                   />
-                  <span v-else class="bot">✦</span>
                 </span>
                 <span class="agent-text">
                   <span class="name-row">
