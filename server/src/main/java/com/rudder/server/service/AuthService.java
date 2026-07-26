@@ -19,13 +19,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
- * 认证与工作区：注册不自动建工作区；新用户需引导页手动创建后才能进入产品。
+ * 认证与工作区：注册不自动建工作区；引导信息落库；一账号可加入多个工作区。
  */
 @Service
 @RequiredArgsConstructor
@@ -56,7 +59,6 @@ public class AuthService {
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.insert(user);
 
-        // 新用户不自动创建工作区，需引导页手动创建
         String sessionToken = issueToken(user.getId(), TokenTypes.SESSION, "desktop-session");
         return authPayload(user, null, sessionToken, null);
     }
@@ -64,18 +66,15 @@ public class AuthService {
     @Transactional
     public Map<String, Object> loginSession(String email, String password) {
         UserEntity user = requireValidUser(email, password);
-        WorkspaceEntity workspace = findDefaultWorkspace(user.getId());
+        WorkspaceEntity workspace = resolveActiveWorkspace(user);
         String sessionToken = issueToken(user.getId(), TokenTypes.SESSION, "desktop-session");
         return authPayload(user, workspace, sessionToken, null);
     }
 
-    /**
-     * CLI daemon login：签发与 session 分离的 daemon Token；须已有工作区。
-     */
     @Transactional
     public Map<String, Object> loginDaemon(String email, String password) {
         UserEntity user = requireValidUser(email, password);
-        WorkspaceEntity workspace = findDefaultWorkspace(user.getId());
+        WorkspaceEntity workspace = resolveActiveWorkspace(user);
         if (workspace == null) {
             throw new IllegalArgumentException("请先在 Desktop 完成引导并创建工作区");
         }
@@ -107,32 +106,63 @@ public class AuthService {
         if (user == null) {
             return null;
         }
-        WorkspaceEntity workspace = findDefaultWorkspace(user.getId());
+        WorkspaceEntity workspace = resolveActiveWorkspace(user);
         Long workspaceId = workspace == null ? null : workspace.getId();
         return new AuthPrincipal(user.getId(), user.getEmail(), token.getTokenType(), workspaceId);
     }
 
     public Map<String, Object> me(AuthPrincipal principal) {
         UserEntity user = userMapper.selectById(principal.userId());
-        WorkspaceEntity workspace = findDefaultWorkspace(principal.userId());
-        return authPayload(user, workspace, null, null);
+        WorkspaceEntity workspace = resolveActiveWorkspace(user);
+        Map<String, Object> payload = authPayload(user, workspace, null, null);
+        payload.put("workspaces", listWorkspaceViews(principal.userId()));
+        return payload;
+    }
+
+    /** 引导第 1 步：保存角色与使用目的到用户表。 */
+    @Transactional
+    public Map<String, Object> saveOnboardingProfile(AuthPrincipal principal, String role, String intent) {
+        requireSession(principal);
+        UserEntity user = userMapper.selectById(principal.userId());
+        if (user == null) {
+            throw new IllegalArgumentException("用户不存在");
+        }
+        if (StringUtils.hasText(role)) {
+            user.setOnboardRole(role.trim());
+        }
+        if (StringUtils.hasText(intent)) {
+            user.setOnboardIntent(intent.trim());
+        }
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return toUserView(user);
     }
 
     /**
-     * 引导页创建首个工作区（或额外工作区；MVP 每用户通常一个）。
+     * 创建工作区并加入为 owner；可同时写入引导角色/用途与 issue 前缀。
+     * 一账号可多次调用创建多个工作区。
      */
     @Transactional
     public Map<String, Object> createWorkspace(AuthPrincipal principal, String name, String slugInput,
-                                               String issuePrefix) {
-        if (principal == null || !TokenTypes.SESSION.equals(principal.tokenType())) {
-            throw new IllegalArgumentException("需要会话登录");
-        }
+                                               String issuePrefix, String role, String intent) {
+        requireSession(principal);
         if (!StringUtils.hasText(name)) {
             throw new IllegalArgumentException("工作区名称不能为空");
         }
         String trimmedName = name.trim();
         if (trimmedName.length() > 64) {
             throw new IllegalArgumentException("工作区名称过长");
+        }
+
+        UserEntity user = userMapper.selectById(principal.userId());
+        if (user == null) {
+            throw new IllegalArgumentException("用户不存在");
+        }
+        if (StringUtils.hasText(role)) {
+            user.setOnboardRole(role.trim());
+        }
+        if (StringUtils.hasText(intent)) {
+            user.setOnboardIntent(intent.trim());
         }
 
         String slug = StringUtils.hasText(slugInput) ? slugify(slugInput) : slugify(trimmedName);
@@ -142,33 +172,86 @@ public class AuthService {
         if (slugExists(slug)) {
             slug = slug + "-" + UUID.randomUUID().toString().substring(0, 6);
         }
+        String prefix = StringUtils.hasText(issuePrefix)
+                ? issuePrefix.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "")
+                : deriveIssuePrefix(slug);
+        if (!StringUtils.hasText(prefix)) {
+            prefix = "WS";
+        }
+        if (prefix.length() > 16) {
+            prefix = prefix.substring(0, 16);
+        }
 
+        LocalDateTime now = LocalDateTime.now();
         WorkspaceEntity workspace = new WorkspaceEntity();
         workspace.setName(trimmedName);
         workspace.setSlug(slug);
-        workspace.setCreatedAt(LocalDateTime.now());
-        workspace.setUpdatedAt(LocalDateTime.now());
+        workspace.setIssuePrefix(prefix);
+        workspace.setCreatedBy(principal.userId());
+        workspace.setCreatedAt(now);
+        workspace.setUpdatedAt(now);
         workspaceMapper.insert(workspace);
 
         WorkspaceMemberEntity member = new WorkspaceMemberEntity();
         member.setWorkspaceId(workspace.getId());
         member.setUserId(principal.userId());
         member.setRole("owner");
-        member.setCreatedAt(LocalDateTime.now());
+        member.setLastAccessedAt(now);
+        member.setCreatedAt(now);
         workspaceMemberMapper.insert(member);
 
-        Map<String, Object> view = toWorkspaceView(workspace);
-        if (StringUtils.hasText(issuePrefix)) {
-            view.put("issuePrefix", issuePrefix.trim().toUpperCase(Locale.ROOT));
-        } else {
-            view.put("issuePrefix", deriveIssuePrefix(slug));
+        user.setActiveWorkspaceId(workspace.getId());
+        user.setUpdatedAt(now);
+        userMapper.updateById(user);
+
+        return toWorkspaceView(workspace, "owner");
+    }
+
+    /** 列出当前用户加入的全部工作区。 */
+    public List<Map<String, Object>> listWorkspaces(AuthPrincipal principal) {
+        requireSession(principal);
+        return listWorkspaceViews(principal.userId());
+    }
+
+    /** 切换当前工作区（须为成员）。 */
+    @Transactional
+    public Map<String, Object> switchWorkspace(AuthPrincipal principal, Long workspaceId) {
+        requireSession(principal);
+        if (workspaceId == null) {
+            throw new IllegalArgumentException("workspaceId 不能为空");
         }
-        return view;
+        WorkspaceMemberEntity member = workspaceMemberMapper.selectOne(new LambdaQueryWrapper<WorkspaceMemberEntity>()
+                .eq(WorkspaceMemberEntity::getUserId, principal.userId())
+                .eq(WorkspaceMemberEntity::getWorkspaceId, workspaceId)
+                .last("LIMIT 1"));
+        if (member == null) {
+            throw new IllegalArgumentException("无权访问该工作区");
+        }
+        WorkspaceEntity workspace = workspaceMapper.selectById(workspaceId);
+        if (workspace == null) {
+            throw new IllegalArgumentException("工作区不存在");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        member.setLastAccessedAt(now);
+        workspaceMemberMapper.updateById(member);
+
+        UserEntity user = userMapper.selectById(principal.userId());
+        user.setActiveWorkspaceId(workspaceId);
+        user.setUpdatedAt(now);
+        userMapper.updateById(user);
+
+        return toWorkspaceView(workspace, member.getRole());
     }
 
     public void requireWorkspace(AuthPrincipal p) {
         if (p == null || p.workspaceId() == null) {
             throw new IllegalArgumentException("请先创建工作区");
+        }
+    }
+
+    private void requireSession(AuthPrincipal principal) {
+        if (principal == null || !TokenTypes.SESSION.equals(principal.tokenType())) {
+            throw new IllegalArgumentException("需要会话登录");
         }
     }
 
@@ -186,15 +269,53 @@ public class AuthService {
                 .last("LIMIT 1"));
     }
 
-    private WorkspaceEntity findDefaultWorkspace(Long userId) {
-        WorkspaceMemberEntity member = workspaceMemberMapper.selectOne(new LambdaQueryWrapper<WorkspaceMemberEntity>()
-                .eq(WorkspaceMemberEntity::getUserId, userId)
+    /**
+     * 解析当前工作区：优先 active_workspace_id（且仍为成员），否则最近访问，再否则最早加入。
+     */
+    private WorkspaceEntity resolveActiveWorkspace(UserEntity user) {
+        if (user == null) return null;
+        if (user.getActiveWorkspaceId() != null) {
+            WorkspaceMemberEntity m = workspaceMemberMapper.selectOne(new LambdaQueryWrapper<WorkspaceMemberEntity>()
+                    .eq(WorkspaceMemberEntity::getUserId, user.getId())
+                    .eq(WorkspaceMemberEntity::getWorkspaceId, user.getActiveWorkspaceId())
+                    .last("LIMIT 1"));
+            if (m != null) {
+                WorkspaceEntity ws = workspaceMapper.selectById(user.getActiveWorkspaceId());
+                if (ws != null) return ws;
+            }
+        }
+        List<WorkspaceMemberEntity> members = workspaceMemberMapper.selectList(new LambdaQueryWrapper<WorkspaceMemberEntity>()
+                .eq(WorkspaceMemberEntity::getUserId, user.getId())
+                .orderByDesc(WorkspaceMemberEntity::getLastAccessedAt)
                 .orderByAsc(WorkspaceMemberEntity::getId)
                 .last("LIMIT 1"));
-        if (member == null) {
+        if (members.isEmpty()) {
             return null;
         }
-        return workspaceMapper.selectById(member.getWorkspaceId());
+        return workspaceMapper.selectById(members.get(0).getWorkspaceId());
+    }
+
+    private List<Map<String, Object>> listWorkspaceViews(Long userId) {
+        List<WorkspaceMemberEntity> members = workspaceMemberMapper.selectList(new LambdaQueryWrapper<WorkspaceMemberEntity>()
+                .eq(WorkspaceMemberEntity::getUserId, userId)
+                .orderByDesc(WorkspaceMemberEntity::getLastAccessedAt)
+                .orderByAsc(WorkspaceMemberEntity::getId));
+        if (members.isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = members.stream().map(WorkspaceMemberEntity::getWorkspaceId).toList();
+        Map<Long, WorkspaceEntity> byId = workspaceMapper.selectList(new LambdaQueryWrapper<WorkspaceEntity>()
+                        .in(WorkspaceEntity::getId, ids))
+                .stream()
+                .collect(Collectors.toMap(WorkspaceEntity::getId, w -> w, (a, b) -> a));
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (WorkspaceMemberEntity m : members) {
+            WorkspaceEntity w = byId.get(m.getWorkspaceId());
+            if (w != null) {
+                out.add(toWorkspaceView(w, m.getRole()));
+            }
+        }
+        return out;
     }
 
     private boolean slugExists(String slug) {
@@ -221,7 +342,7 @@ public class AuthService {
                                             String sessionToken, String daemonToken) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("user", toUserView(user));
-        map.put("workspace", workspace == null ? null : toWorkspaceView(workspace));
+        map.put("workspace", workspace == null ? null : toWorkspaceView(workspace, null));
         map.put("needsOnboarding", workspace == null);
         if (sessionToken != null) {
             map.put("sessionToken", sessionToken);
@@ -233,19 +354,32 @@ public class AuthService {
     }
 
     private Map<String, Object> toUserView(UserEntity user) {
-        return Map.of(
-                "id", String.valueOf(user.getId()),
-                "email", user.getEmail(),
-                "displayName", user.getDisplayName()
-        );
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", String.valueOf(user.getId()));
+        m.put("email", user.getEmail());
+        m.put("displayName", user.getDisplayName());
+        m.put("onboardRole", user.getOnboardRole());
+        m.put("onboardIntent", user.getOnboardIntent());
+        m.put("activeWorkspaceId",
+                user.getActiveWorkspaceId() == null ? null : String.valueOf(user.getActiveWorkspaceId()));
+        return m;
     }
 
-    private Map<String, Object> toWorkspaceView(WorkspaceEntity workspace) {
+    private Map<String, Object> toWorkspaceView(WorkspaceEntity workspace, String memberRole) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", String.valueOf(workspace.getId()));
         m.put("name", workspace.getName());
         m.put("slug", workspace.getSlug());
-        m.put("issuePrefix", deriveIssuePrefix(workspace.getSlug()));
+        String prefix = StringUtils.hasText(workspace.getIssuePrefix())
+                ? workspace.getIssuePrefix()
+                : deriveIssuePrefix(workspace.getSlug());
+        m.put("issuePrefix", prefix);
+        if (workspace.getCreatedBy() != null) {
+            m.put("createdBy", String.valueOf(workspace.getCreatedBy()));
+        }
+        if (memberRole != null) {
+            m.put("role", memberRole);
+        }
         return m;
     }
 
@@ -255,7 +389,6 @@ public class AuthService {
                 .replaceAll("[^a-z0-9\\u4e00-\\u9fff-]", "-")
                 .replaceAll("-{2,}", "-")
                 .replaceAll("^-|-$", "");
-        // URL 友好：中文转拼音成本高，MVP 用拼音替代为短 hash 片段
         if (s.matches(".*[\\u4e00-\\u9fff].*")) {
             String ascii = s.replaceAll("[\\u4e00-\\u9fff]+", "ws");
             ascii = ascii.replaceAll("-{2,}", "-").replaceAll("^-|-$", "");

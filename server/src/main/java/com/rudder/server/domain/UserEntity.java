@@ -30,6 +30,18 @@ public class UserEntity {
     @TableField("display_name")
     private String displayName;
 
+    /** 引导：角色（工程师/产品经理等） */
+    @TableField("onboard_role")
+    private String onboardRole;
+
+    /** 引导：使用目的 */
+    @TableField("onboard_intent")
+    private String onboardIntent;
+
+    /** 当前选中的工作区 id（一账号多工作区） */
+    @TableField("active_workspace_id")
+    private Long activeWorkspaceId;
+
     /** 创建时间 */
     @TableField("created_at")
     private LocalDateTime createdAt;

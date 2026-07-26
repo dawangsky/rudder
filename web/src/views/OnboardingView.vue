@@ -103,12 +103,28 @@ function nextFromWelcome() {
   step.value = 1
 }
 
+function continueAbout() {
+  void saveProfile()
+  step.value = 2
+}
+
 function skipAbout() {
   step.value = 2
 }
 
-function continueAbout() {
-  step.value = 2
+async function saveProfile() {
+  if (!role.value && !intent.value) return
+  try {
+    await apiFetch('/api/auth/onboarding-profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        role: role.value || undefined,
+        intent: intent.value || undefined,
+      }),
+    })
+  } catch (e) {
+    console.warn('引导资料保存失败', e)
+  }
 }
 
 async function createWorkspace() {

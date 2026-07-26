@@ -45,8 +45,8 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         boolean workspaceExempt =
                 path.startsWith("/api/auth/me")
-                        || path.equals("/api/auth/workspaces")
-                        || path.equals("/api/auth/workspaces/");
+                        || path.startsWith("/api/auth/onboarding-profile")
+                        || path.startsWith("/api/auth/workspaces");
         if (!workspaceExempt && principal.workspaceId() == null && path.startsWith("/api/")) {
             response.setStatus(HttpStatus.FORBIDDEN.value());
             return false;

@@ -26,6 +26,14 @@ public class WorkspaceEntity {
     @TableField("slug")
     private String slug;
 
+    /** issue 编号前缀，如 WS-123 */
+    @TableField("issue_prefix")
+    private String issuePrefix;
+
+    /** 创建人 user_id */
+    @TableField("created_by")
+    private Long createdBy;
+
     /** 创建时间 */
     @TableField("created_at")
     private LocalDateTime createdAt;

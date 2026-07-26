@@ -29,6 +29,10 @@ public class WorkspaceMemberEntity {
     @TableField("role")
     private String role;
 
+    /** 最近进入该工作区的时间 */
+    @TableField("last_accessed_at")
+    private LocalDateTime lastAccessedAt;
+
     /** 创建时间 */
     @TableField("created_at")
     private LocalDateTime createdAt;
