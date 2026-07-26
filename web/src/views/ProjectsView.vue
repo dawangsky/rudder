@@ -612,13 +612,19 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 </template>
 
 <style scoped>
-.page { max-width: 1000px; }
+.page {
+  max-width: 1000px;
+  min-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+}
 .head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
   margin-bottom: 18px;
+  flex-shrink: 0;
 }
 h2 {
   margin: 0;
@@ -651,13 +657,16 @@ h2 {
   cursor: pointer;
 }
 .empty-state {
-  margin-top: 64px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
   gap: 12px;
-  padding: 40px 20px;
+  /* 相对视口垂直居中再略偏下 */
+  padding: 8vh 20px 22vh;
+  margin-top: 0;
 }
 .empty-icon {
   width: 56px;
