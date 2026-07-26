@@ -11,7 +11,9 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import ActionIcon from '@/components/ActionIcon.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
+import RuntimeAgentAvatars from '@/components/RuntimeAgentAvatars.vue'
 import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
+import type { Agent } from '@/lib/agents'
 import {
   displayName,
   formatHeartbeat,
@@ -28,7 +30,7 @@ const route = useRoute()
 const router = useRouter()
 
 const runtimes = ref<Runtime[]>([])
-const agents = ref<{ id: string; name: string; runtimeId?: string | null; status?: string }[]>([])
+const agents = ref<Agent[]>([])
 const localDaemonId = ref('')
 const localHostName = ref('')
 const localProfile = ref('')
@@ -129,18 +131,20 @@ function loadAlias() {
 async function load() {
   const [rts, ags] = await Promise.all([
     apiFetch<Runtime[]>('/api/runtimes'),
-    apiFetch<{ id: string; name: string; runtimeId?: string | null; status?: string }[]>('/api/agents').catch(
-      () => [] as { id: string; name: string; runtimeId?: string | null; status?: string }[],
-    ),
+    apiFetch<Agent[]>('/api/agents').catch(() => [] as Agent[]),
   ])
   runtimes.value = rts
   agents.value = ags
 }
 
-function agentCountFor(r: Runtime) {
+function agentsFor(r: Runtime) {
   return agents.value.filter(
     (a) => a.runtimeId === r.id && (a.status || '').toLowerCase() !== 'archived',
-  ).length
+  )
+}
+
+function agentCountFor(r: Runtime) {
+  return agentsFor(r).length
 }
 
 const pendingDeleteAgentCount = computed(() =>
@@ -522,7 +526,9 @@ onUnmounted(() => {
             <td>
               <span class="health" :class="r.status">{{ r.status === 'online' ? '在线' : '离线' }}</span>
             </td>
-            <td class="muted">{{ agentCountFor(r) || '—' }}</td>
+            <td @click.stop>
+              <RuntimeAgentAvatars :runtime="r" :agents="agents" />
+            </td>
             <td class="muted">{{ formatHeartbeat(r.lastHeartbeatAt) }}</td>
             <td class="muted">{{ providerLabel(r) }}</td>
             <td class="col-actions" @click.stop>
