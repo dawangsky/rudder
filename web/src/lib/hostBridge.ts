@@ -59,6 +59,7 @@ type HostBridgeApi = {
     command: string
     description?: string
   }) => Promise<RuntimeActionResult>
+  selectDirectory: () => Promise<{ ok: boolean; path: string }>
 }
 
 declare global {
@@ -122,6 +123,9 @@ export function getHostBridge(): HostBridgeApi {
     },
     async addCustomRuntime() {
       return { ok: false, message: '非 Desktop：请执行 rudder runtime add-custom' }
+    },
+    async selectDirectory() {
+      return { ok: false, path: '' }
     },
   }
 }

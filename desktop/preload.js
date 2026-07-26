@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('rudderHost', {
   removeRuntime: (provider) => ipcRenderer.invoke('runtime:remove', provider),
   validateCommand: (command) => ipcRenderer.invoke('runtime:validate-command', command),
   addCustomRuntime: (payload) => ipcRenderer.invoke('runtime:add-custom', payload),
+  selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
 })

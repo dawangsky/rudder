@@ -6,7 +6,7 @@
  * - 启动时若有凭证且 autoStartOnLaunch 则自动拉起
  * - 登录后由渲染进程写入凭证并 restart
  */
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -280,6 +280,17 @@ ipcMain.handle('runtime:add-custom', async (_evt, payload) => {
   const r = await runCli(args)
   const message = (r.err || r.out || '').trim() || (r.code === 0 ? 'ok' : '创建失败')
   return { ok: r.code === 0, message }
+})
+
+ipcMain.handle('dialog:select-directory', async () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow
+  const result = await dialog.showOpenDialog(win || undefined, {
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (result.canceled || !result.filePaths?.length) {
+    return { ok: false, path: '' }
+  }
+  return { ok: true, path: result.filePaths[0] }
 })
 
 app.whenReady().then(async () => {

@@ -19,8 +19,10 @@ import {
   type WorkspaceMember,
 } from '@/lib/projects'
 import { getWorkspaceId } from '@/lib/session'
+import { getHostBridge, isDesktopHost } from '@/lib/hostBridge'
 
 type ChipMenu = 'status' | 'priority' | 'assignee' | 'repo' | 'more' | null
+type RepoTab = 'github' | 'local'
 
 const items = ref<Project[]>([])
 const members = ref<WorkspaceMember[]>([])
@@ -38,9 +40,13 @@ const priority = ref<ProjectPriority>('none')
 const assigneeUserId = ref('')
 const repoUrl = ref('')
 const localPath = ref('')
+const repoDraft = ref('')
+const localDraft = ref('')
+const repoTab = ref<RepoTab>('github')
 const startDate = ref('')
 const dueDate = ref('')
 const openChip = ref<ChipMenu>(null)
+const isDesktop = isDesktopHost()
 
 const workspaceName = ref('工作区')
 
@@ -56,6 +62,43 @@ const memberById = computed(() => {
   return m
 })
 
+const repoChipLabel = computed(() => {
+  if (localPath.value) {
+    const parts = localPath.value.replace(/\\/g, '/').split('/')
+    return parts.filter(Boolean).pop() || '本地目录'
+  }
+  if (repoUrl.value) {
+    try {
+      const u = new URL(repoUrl.value)
+      const segs = u.pathname.split('/').filter(Boolean)
+      return segs.slice(-2).join('/') || 'GitHub 仓库'
+    } catch {
+      return 'GitHub 仓库'
+    }
+  }
+  return '代码仓库'
+})
+
+function priorityBars(level: ProjectPriority | string) {
+  const n =
+    level === 'urgent' ? 4 : level === 'high' ? 3 : level === 'medium' ? 2 : level === 'low' ? 1 : 0
+  return n
+}
+
+function priorityTone(level: ProjectPriority | string) {
+  switch (level) {
+    case 'urgent':
+      return 'urgent'
+    case 'high':
+      return 'high'
+    case 'medium':
+      return 'medium'
+    case 'low':
+      return 'low'
+    default:
+      return 'none'
+  }
+}
 async function load() {
   loading.value = true
   err.value = ''
@@ -85,6 +128,9 @@ function openCreate() {
   assigneeUserId.value = ''
   repoUrl.value = ''
   localPath.value = ''
+  repoDraft.value = ''
+  localDraft.value = ''
+  repoTab.value = 'github'
   startDate.value = ''
   dueDate.value = ''
   openChip.value = null
@@ -100,6 +146,43 @@ function closeCreate() {
 
 function toggleChip(chip: ChipMenu) {
   openChip.value = openChip.value === chip ? null : chip
+  if (chip === 'repo' && openChip.value === 'repo') {
+    repoDraft.value = repoUrl.value
+    localDraft.value = localPath.value
+    repoTab.value = localPath.value && !repoUrl.value ? 'local' : 'github'
+  }
+}
+
+function applyRepoUrl() {
+  const v = repoDraft.value.trim()
+  if (!v) return
+  repoUrl.value = v
+  openChip.value = null
+}
+
+function applyLocalPath() {
+  const v = localDraft.value.trim()
+  if (!v) return
+  localPath.value = v
+  openChip.value = null
+}
+
+async function pickLocalDirectory() {
+  const res = await getHostBridge().selectDirectory()
+  if (res.ok && res.path) {
+    localDraft.value = res.path
+    localPath.value = res.path
+  }
+}
+
+function clearRepo() {
+  repoUrl.value = ''
+  repoDraft.value = ''
+}
+
+function clearLocal() {
+  localPath.value = ''
+  localDraft.value = ''
 }
 
 function onDocClick(e: MouseEvent) {
@@ -310,7 +393,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
                 <i class="dot" :class="status" />
                 {{ statusLabel(status) }}
               </button>
-              <div v-if="openChip === 'status'" class="pop" @click.stop>
+              <div v-if="openChip === 'status'" class="pop pop-up" @click.stop>
                 <button
                   v-for="s in PROJECT_STATUSES"
                   :key="s.value"
@@ -326,10 +409,12 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
             <div class="chip-wrap">
               <button type="button" class="chip" @click.stop="toggleChip('priority')">
-                <span class="prio">—</span>
+                <span class="bars" :class="priorityTone(priority)" aria-hidden="true">
+                  <i v-for="i in 4" :key="i" :class="{ on: i <= priorityBars(priority) }" />
+                </span>
                 {{ priorityLabel(priority) }}
               </button>
-              <div v-if="openChip === 'priority'" class="pop" @click.stop>
+              <div v-if="openChip === 'priority'" class="pop pop-up" @click.stop>
                 <button
                   v-for="pr in PROJECT_PRIORITIES"
                   :key="pr.value"
@@ -337,6 +422,9 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
                   :class="{ on: priority === pr.value }"
                   @click="priority = pr.value; openChip = null"
                 >
+                  <span class="bars" :class="priorityTone(pr.value)" aria-hidden="true">
+                    <i v-for="i in 4" :key="i" :class="{ on: i <= priorityBars(pr.value) }" />
+                  </span>
                   {{ pr.label }}
                 </button>
               </div>
@@ -352,7 +440,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
                 </span>
                 {{ assignee ? memberLabel(assignee) : '负责人' }}
               </button>
-              <div v-if="openChip === 'assignee'" class="pop" @click.stop>
+              <div v-if="openChip === 'assignee'" class="pop pop-up" @click.stop>
                 <button
                   type="button"
                   :class="{ on: !assigneeUserId }"
@@ -379,24 +467,79 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
                     <path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.48 0-.24-.01-.87-.01-1.7-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.73 0 0 .84-.27 2.75 1.05A9.3 9.3 0 0 1 12 6.84c.85 0 1.71.12 2.51.35 1.91-1.32 2.75-1.05 2.75-1.05.55 1.42.2 2.47.1 2.73.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .26.18.58.69.48A10.03 10.03 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z" />
                   </svg>
                 </span>
-                {{ repoUrl || localPath ? '已关联仓库' : '代码仓库' }}
+                {{ repoChipLabel }}
               </button>
-              <div v-if="openChip === 'repo'" class="pop pop-form" @click.stop>
-                <label>
-                  GitHub / Git URL
-                  <input v-model="repoUrl" type="url" placeholder="https://github.com/org/repo" />
-                </label>
-                <label>
-                  本机路径（可选）
-                  <input v-model="localPath" type="text" placeholder="/Users/you/code/app" />
-                </label>
-                <button type="button" class="btn-mini" @click="openChip = null">完成</button>
+              <div v-if="openChip === 'repo'" class="pop pop-up pop-repo" @click.stop>
+                <div class="repo-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    :class="{ on: repoTab === 'github' }"
+                    @click="repoTab = 'github'"
+                  >GitHub 仓库</button>
+                  <button
+                    type="button"
+                    role="tab"
+                    :class="{ on: repoTab === 'local' }"
+                    @click="repoTab = 'local'"
+                  >本地目录</button>
+                </div>
+
+                <div v-if="repoTab === 'github'" class="repo-pane">
+                  <strong>为此项目关联 GitHub 仓库</strong>
+                  <p>还没有工作区级别的仓库。可以在下方粘贴 URL 临时关联一个。</p>
+                  <div v-if="repoUrl" class="linked">
+                    <span>{{ repoUrl }}</span>
+                    <button type="button" class="link-clear" @click="clearRepo">移除</button>
+                  </div>
+                  <div class="repo-row">
+                    <input
+                      v-model="repoDraft"
+                      type="url"
+                      placeholder="https://github.com/owner/repo 或 git..."
+                      @keydown.enter.prevent="applyRepoUrl"
+                    />
+                    <button type="button" class="link-add" :disabled="!repoDraft.trim()" @click="applyRepoUrl">
+                      添加
+                    </button>
+                  </div>
+                </div>
+
+                <div v-else class="repo-pane">
+                  <strong>为此项目关联本地目录</strong>
+                  <p>Agent 执行时优先使用该本机绝对路径作为工作目录。</p>
+                  <div v-if="localPath" class="linked">
+                    <span>{{ localPath }}</span>
+                    <button type="button" class="link-clear" @click="clearLocal">移除</button>
+                  </div>
+                  <div class="repo-row">
+                    <input
+                      v-model="localDraft"
+                      type="text"
+                      placeholder="/Users/you/code/app"
+                      @keydown.enter.prevent="applyLocalPath"
+                    />
+                    <button
+                      v-if="isDesktop"
+                      type="button"
+                      class="link-add"
+                      @click="pickLocalDirectory"
+                    >选择</button>
+                    <button
+                      v-else
+                      type="button"
+                      class="link-add"
+                      :disabled="!localDraft.trim()"
+                      @click="applyLocalPath"
+                    >添加</button>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div class="chip-wrap">
               <button type="button" class="chip chip-more" @click.stop="toggleChip('more')">⋯</button>
-              <div v-if="openChip === 'more'" class="pop pop-dates" @click.stop>
+              <div v-if="openChip === 'more'" class="pop pop-up pop-dates" @click.stop>
                 <label>
                   设置截止日期…
                   <input v-model="dueDate" type="date" />
@@ -564,8 +707,7 @@ tr:last-child td { border-bottom: none; }
   background: #fff;
   border-radius: 14px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
-  max-height: min(92vh, 760px);
-  overflow: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
@@ -574,6 +716,7 @@ tr:last-child td { border-bottom: none; }
   justify-content: space-between;
   align-items: center;
   padding: 14px 16px 0;
+  flex-shrink: 0;
 }
 .crumb {
   display: flex;
@@ -653,18 +796,39 @@ tr:last-child td { border-bottom: none; }
 }
 .chip:hover { background: #f9fafb; }
 .chip-more { padding: 6px 10px; font-weight: 700; letter-spacing: 1px; }
-.prio { color: #9ca3af; font-weight: 700; }
 .user-ico, .gh {
   display: inline-flex;
   align-items: center;
   color: #6b7280;
 }
 
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 12px;
+  width: 14px;
+}
+.bars i {
+  display: block;
+  width: 2.5px;
+  border-radius: 1px;
+  background: #d1d5db;
+  align-self: flex-end;
+}
+.bars i:nth-child(1) { height: 4px; }
+.bars i:nth-child(2) { height: 6px; }
+.bars i:nth-child(3) { height: 8px; }
+.bars i:nth-child(4) { height: 10px; }
+.bars.urgent i.on { background: #ef4444; }
+.bars.high i.on { background: #f59e0b; }
+.bars.medium i.on { background: #fb923c; }
+.bars.low i.on { background: #3b82f6; }
+.bars.none i { background: #d1d5db; }
+
 .pop {
   position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 5;
+  z-index: 20;
   min-width: 160px;
   background: #fff;
   border: 1px solid var(--border);
@@ -674,6 +838,11 @@ tr:last-child td { border-bottom: none; }
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.pop-up {
+  bottom: calc(100% + 6px);
+  left: 0;
+  top: auto;
 }
 .pop button {
   border: none;
@@ -690,13 +859,11 @@ tr:last-child td { border-bottom: none; }
 }
 .pop button:hover,
 .pop button.on { background: #f3f4f6; }
-.pop-form,
 .pop-dates {
-  min-width: 260px;
+  min-width: 240px;
   padding: 10px;
   gap: 8px;
 }
-.pop-form label,
 .pop-dates label {
   display: flex;
   flex-direction: column;
@@ -705,7 +872,6 @@ tr:last-child td { border-bottom: none; }
   color: var(--muted);
   font-weight: 600;
 }
-.pop-form input,
 .pop-dates input {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -714,6 +880,108 @@ tr:last-child td { border-bottom: none; }
   font-size: 13px;
   font-weight: 400;
   color: var(--text);
+}
+.pop-repo {
+  width: min(360px, 78vw);
+  min-width: 300px;
+  padding: 10px;
+  gap: 10px;
+  right: 0;
+  left: auto;
+}
+.repo-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: #f3f4f6;
+}
+.repo-tabs button {
+  flex: 1;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+.repo-tabs button.on {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.repo-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+.repo-pane strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+.repo-pane > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.linked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #374151;
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.linked span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-clear {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.repo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #f3f4f6;
+  padding-top: 10px;
+  margin-top: 2px;
+}
+.repo-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+}
+.link-add {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 2px;
+  white-space: nowrap;
+}
+.link-add:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
 }
 .btn-mini {
   align-self: flex-end;
@@ -732,6 +1000,8 @@ tr:last-child td { border-bottom: none; }
   padding: 12px 16px 16px;
   border-top: 1px solid #f3f4f6;
   margin-top: 8px;
+  flex-shrink: 0;
+  border-radius: 0 0 14px 14px;
 }
 .btn-create {
   border: none;

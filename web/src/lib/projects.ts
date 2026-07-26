@@ -33,11 +33,11 @@ export const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [
 ]
 
 export const PROJECT_PRIORITIES: { value: ProjectPriority; label: string }[] = [
-  { value: 'none', label: '无优先级' },
-  { value: 'low', label: '低' },
-  { value: 'medium', label: '中' },
-  { value: 'high', label: '高' },
   { value: 'urgent', label: '紧急' },
+  { value: 'high', label: '高' },
+  { value: 'medium', label: '中' },
+  { value: 'low', label: '低' },
+  { value: 'none', label: '无优先级' },
 ]
 
 export function statusLabel(status?: string) {
