@@ -199,6 +199,14 @@ func handleClaim(api *client.API, providerName string, claim map[string]any, cus
 		}
 	}
 	instructions := fmt.Sprint(agent["instructions"])
+	model := fmt.Sprint(agent["model"])
+	if model == "" || model == "<nil>" {
+		model = "default"
+	}
+	thinkingMode := fmt.Sprint(agent["thinkingMode"])
+	if thinkingMode == "" || thinkingMode == "<nil>" {
+		thinkingMode = "cli"
+	}
 	prompt := fmt.Sprint(task["prompt"])
 	agentProvider := fmt.Sprint(agent["provider"])
 	if agentProvider == "" {
@@ -219,18 +227,18 @@ func handleClaim(api *client.API, providerName string, claim map[string]any, cus
 		_ = api.Report(taskID, map[string]any{"status": "failed", "errorMessage": err.Error()})
 		return
 	}
-	execenv.AppendLog(envRoot, "start provider="+agentProvider)
+	execenv.AppendLog(envRoot, "start provider="+agentProvider+" model="+model+" thinking="+thinkingMode)
 
 	var res provider.Result
 	if customCommand != "" {
-		res = provider.RunCommandLine(customCommand, workDir, prompt, instructions)
+		res = provider.RunCommandLine(customCommand, workDir, prompt, instructions, model, thinkingMode)
 	} else {
 		runProvider := detect.BaseProvider(agentProvider)
-		res = provider.Run(runProvider, workDir, prompt, instructions)
+		res = provider.Run(runProvider, workDir, prompt, instructions, model, thinkingMode)
 		if res.Err != nil && runProvider != "stub" {
 			execenv.AppendLog(envRoot, "provider failed, fallback stub: "+res.Err.Error())
 			_ = api.Report(taskID, map[string]any{"status": "log", "line": "fallback to stub provider"})
-			res = provider.Run("stub", workDir, prompt, instructions)
+			res = provider.Run("stub", workDir, prompt, instructions, model, thinkingMode)
 		}
 	}
 	_ = api.Report(taskID, map[string]any{"status": "log", "line": "provider finished"})

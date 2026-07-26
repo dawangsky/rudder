@@ -448,12 +448,15 @@ public class OrchestrationService {
         List<SkillEntity> skills = resourceService.skillsOfAgent(agent.getId());
         Map<String, Object> payload = new HashMap<>();
         payload.put("task", taskView(task));
-        payload.put("agent", Map.of(
-                "id", String.valueOf(agent.getId()),
-                "name", agent.getName(),
-                "provider", agent.getProvider(),
-                "instructions", nullToEmpty(agent.getInstructions())
-        ));
+        Map<String, Object> agentPayload = new HashMap<>();
+        agentPayload.put("id", String.valueOf(agent.getId()));
+        agentPayload.put("name", agent.getName());
+        agentPayload.put("provider", agent.getProvider());
+        agentPayload.put("instructions", nullToEmpty(agent.getInstructions()));
+        agentPayload.put("model", StringUtils.hasText(agent.getModel()) ? agent.getModel() : "default");
+        agentPayload.put("thinkingMode", StringUtils.hasText(agent.getThinkingMode()) ? agent.getThinkingMode() : "cli");
+        agentPayload.put("maxConcurrency", agent.getMaxConcurrency() == null ? 1 : agent.getMaxConcurrency());
+        payload.put("agent", agentPayload);
         payload.put("workDir", workDir);
         payload.put("envRoot", WorkdirResolver.sandboxEnvRoot(task.getWorkspaceId(), task.getId()));
         payload.put("skills", skills.stream().map(s -> Map.of("name", s.getName(), "content", s.getContent())).toList());

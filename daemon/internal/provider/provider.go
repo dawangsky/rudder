@@ -15,7 +15,7 @@ type Result struct {
 }
 
 // RunCommandLine 执行自定义启动命令；支持 {prompt} 占位，否则将 prompt 作为末尾参数追加。
-func RunCommandLine(cmdline, workDir, prompt, instructions string) Result {
+func RunCommandLine(cmdline, workDir, prompt, instructions, model, thinkingMode string) Result {
 	cmdline = strings.TrimSpace(cmdline)
 	if cmdline == "" {
 		return Result{Err: fmt.Errorf("自定义命令为空")}
@@ -31,6 +31,8 @@ func RunCommandLine(cmdline, workDir, prompt, instructions string) Result {
 	cmd.Env = append(os.Environ(),
 		"RUDDER_PROMPT="+prompt,
 		"RUDDER_INSTRUCTIONS="+instructions,
+		"RUDDER_MODEL="+model,
+		"RUDDER_THINKING_MODE="+thinkingMode,
 	)
 	out, err := cmd.CombinedOutput()
 	summary := string(out)
@@ -51,20 +53,26 @@ func shellQuote(s string) string {
 }
 
 // Run 按 provider 执行；找不到真实 CLI 时回退 stub，保证端到端可冒烟。
-func Run(provider, workDir, prompt, instructions string) Result {
+func Run(provider, workDir, prompt, instructions, model, thinkingMode string) Result {
+	env := map[string]string{
+		"RUDDER_PROMPT":         prompt,
+		"RUDDER_INSTRUCTIONS":   instructions,
+		"RUDDER_MODEL":          model,
+		"RUDDER_THINKING_MODE":  thinkingMode,
+	}
 	switch provider {
 	case "claude_code":
 		if bin, err := exec.LookPath("claude"); err == nil {
-			return runCmd(bin, workDir, []string{"-p", prompt}, map[string]string{})
+			return runCmd(bin, workDir, []string{"-p", prompt}, env)
 		}
 	case "codex":
 		if bin, err := exec.LookPath("codex"); err == nil {
-			return runCmd(bin, workDir, []string{"exec", prompt}, map[string]string{})
+			return runCmd(bin, workDir, []string{"exec", prompt}, env)
 		}
 	case "cursor":
 		for _, b := range []string{"cursor-agent", "agent", "cursor"} {
 			if bin, err := exec.LookPath(b); err == nil {
-				return runCmd(bin, workDir, []string{prompt}, map[string]string{})
+				return runCmd(bin, workDir, []string{prompt}, env)
 			}
 		}
 	}

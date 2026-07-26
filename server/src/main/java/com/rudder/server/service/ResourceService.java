@@ -106,6 +106,8 @@ public class ResourceService {
                     .orElse(null);
         }
         a.setRuntimeId(bindRuntimeId);
+        a.setModel(normalizeModel(body.get("model")));
+        a.setThinkingMode(normalizeThinkingMode(body.get("thinkingMode")));
         a.setMaxConcurrency(body.get("maxConcurrency") == null ? 1 : ((Number) body.get("maxConcurrency")).intValue());
         a.setStatus("idle");
         a.setCreatedAt(LocalDateTime.now());
@@ -136,6 +138,8 @@ public class ResourceService {
             a.setProvider(provider.toLowerCase());
         }
         if (body.containsKey("runtimeId")) a.setRuntimeId(asLong(body.get("runtimeId")));
+        if (body.containsKey("model")) a.setModel(normalizeModel(body.get("model")));
+        if (body.containsKey("thinkingMode")) a.setThinkingMode(normalizeThinkingMode(body.get("thinkingMode")));
         if (body.containsKey("maxConcurrency")) {
             int n = body.get("maxConcurrency") == null ? 1 : ((Number) body.get("maxConcurrency")).intValue();
             if (n < 1 || n > 50) {
@@ -274,6 +278,8 @@ public class ResourceService {
         m.put("instructions", a.getInstructions());
         m.put("provider", a.getProvider());
         m.put("runtimeId", a.getRuntimeId() == null ? null : String.valueOf(a.getRuntimeId()));
+        m.put("model", StringUtils.hasText(a.getModel()) ? a.getModel() : "default");
+        m.put("thinkingMode", StringUtils.hasText(a.getThinkingMode()) ? a.getThinkingMode() : "cli");
         m.put("maxConcurrency", a.getMaxConcurrency());
         m.put("status", a.getStatus());
         m.put("skillIds", skillIds.stream().map(String::valueOf).collect(Collectors.toList()));
@@ -821,6 +827,22 @@ public class ResourceService {
         }
         i.setReadFlag(1);
         inboxMapper.updateById(i);
+    }
+
+    private static String normalizeModel(Object raw) {
+        String s = str(raw);
+        if (!StringUtils.hasText(s)) return "default";
+        if (s.length() > 64) throw new IllegalArgumentException("模型标识过长");
+        return s;
+    }
+
+    private static String normalizeThinkingMode(Object raw) {
+        String s = str(raw).toLowerCase();
+        if (!StringUtils.hasText(s)) return "cli";
+        if (!"cli".equals(s) && !"low".equals(s) && !"medium".equals(s) && !"high".equals(s)) {
+            throw new IllegalArgumentException("不支持的思考强度");
+        }
+        return s;
     }
 
     private static String require(Object v, String msg) {

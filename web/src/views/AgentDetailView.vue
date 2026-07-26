@@ -2,14 +2,16 @@
 /**
  * 智能体详情（对齐 Multica）：概览 / 工作 / 能力 / 设置。
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import {
   agentDetailStatus,
   formatRelative,
+  modelOptionsForProvider,
   ownerDisplayName,
   ownerInitials,
+  THINKING_OPTIONS,
   type Agent,
   type AgentDetailTab,
   type AgentSettingsSection,
@@ -48,6 +50,10 @@ const skills = ref<Skill[]>([])
 const err = ref('')
 const saving = ref(false)
 const okMsg = ref('')
+/** 设置页自动保存状态 */
+const saveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+let autoSaveTimer: number | undefined
+let hydratingForm = false
 const showMore = ref(false)
 const showArchive = ref(false)
 const showDelete = ref(false)
@@ -81,6 +87,8 @@ const form = ref({
   avatar: '',
   instructions: '',
   runtimeId: '',
+  model: 'default',
+  thinkingMode: 'cli',
   maxConcurrency: 1,
   skillIds: [] as string[],
 })
@@ -153,6 +161,20 @@ const runtimeOptions = computed(() => {
   return [...map.values()]
 })
 
+const selectedRuntimeProvider = computed(() => {
+  const rt = runtimeOptions.value.find((r) => r.id === form.value.runtimeId)
+  return rt?.provider || agent.value?.provider || ''
+})
+
+const modelOptions = computed(() => modelOptionsForProvider(selectedRuntimeProvider.value))
+
+const saveBadge = computed(() => {
+  if (saveStatus.value === 'saving') return '保存中…'
+  if (saveStatus.value === 'saved') return '已保存'
+  if (saveStatus.value === 'error') return '保存失败'
+  return ''
+})
+
 function setTab(t: AgentDetailTab) {
   const q: Record<string, string> = { tab: t }
   if (t === 'settings') q.section = settingsSection.value
@@ -167,20 +189,25 @@ function setSection(s: AgentSettingsSection) {
   })
 }
 
-function syncForm(a: Agent) {
+async function syncForm(a: Agent) {
+  hydratingForm = true
   form.value = {
     name: a.name || '',
     description: a.description || '',
     avatar: a.avatar || '',
     instructions: a.instructions || '',
     runtimeId: a.runtimeId || '',
+    model: a.model || 'default',
+    thinkingMode: a.thinkingMode || 'cli',
     maxConcurrency: a.maxConcurrency ?? 1,
     skillIds: [...(a.skillIds || [])],
   }
+  await nextTick()
+  hydratingForm = false
 }
 
-async function load() {
-  err.value = ''
+async function load(soft = false) {
+  if (!soft) err.value = ''
   try {
     const [list, rts, tks, sks] = await Promise.all([
       apiFetch<Agent[]>('/api/agents'),
@@ -193,68 +220,53 @@ async function load() {
     skills.value = sks
     const found = list.find((a) => a.id === agentId.value) || null
     agent.value = found
-    if (found) syncForm(found)
+    // 轮询软刷新不覆盖表单，避免打断设置页编辑与自动保存
+    if (found && !soft) await syncForm(found)
   } catch (e) {
-    err.value = e instanceof Error ? e.message : '加载失败'
+    if (!soft) err.value = e instanceof Error ? e.message : '加载失败'
   }
 }
 
-async function saveProfile() {
-  if (!agent.value) return
-  err.value = ''
-  okMsg.value = ''
+function scheduleAutoSave() {
+  if (hydratingForm || !agent.value || isArchived.value) return
+  if (autoSaveTimer) window.clearTimeout(autoSaveTimer)
+  autoSaveTimer = window.setTimeout(() => {
+    void autoSaveSettings()
+  }, 450)
+}
+
+async function autoSaveSettings() {
+  if (!agent.value || isArchived.value || hydratingForm) return
   const name = form.value.name.trim()
   if (!name) {
     err.value = '名称不能为空'
+    saveStatus.value = 'error'
     return
   }
   if (name.length > 64) {
     err.value = '名称最多 64 个字符'
-    return
-  }
-  saving.value = true
-  try {
-    const updated = await apiFetch<Agent>(`/api/agents/${agent.value.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        name,
-        description: form.value.description.trim().slice(0, 255),
-        avatar: form.value.avatar || '',
-      }),
-    })
-    agent.value = updated
-    syncForm(updated)
-    okMsg.value = '资料已保存'
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : '保存失败'
-  } finally {
-    saving.value = false
-  }
-}
-
-async function saveGeneral() {
-  if (!agent.value) return
-  err.value = ''
-  okMsg.value = ''
-  if (!form.value.name.trim()) {
-    err.value = '名称不能为空'
+    saveStatus.value = 'error'
     return
   }
   const conc = Number(form.value.maxConcurrency)
   if (!Number.isFinite(conc) || conc < 1 || conc > 50) {
     err.value = '并发须在 1–50 之间'
+    saveStatus.value = 'error'
     return
   }
+  err.value = ''
+  saveStatus.value = 'saving'
   saving.value = true
   try {
     const rt = runtimeOptions.value.find((r) => r.id === form.value.runtimeId)
     const body: Record<string, unknown> = {
-      name: form.value.name.trim(),
+      name,
       description: form.value.description.trim().slice(0, 255),
       avatar: form.value.avatar || '',
       instructions: form.value.instructions,
+      model: form.value.model || 'default',
+      thinkingMode: form.value.thinkingMode || 'cli',
       maxConcurrency: conc,
-      skillIds: form.value.skillIds,
     }
     if (form.value.runtimeId) {
       body.runtimeId = form.value.runtimeId
@@ -265,14 +277,42 @@ async function saveGeneral() {
       body: JSON.stringify(body),
     })
     agent.value = updated
-    syncForm(updated)
-    okMsg.value = '已保存'
+    await syncForm(updated)
+    saveStatus.value = 'saved'
+    okMsg.value = ''
   } catch (e) {
     err.value = e instanceof Error ? e.message : '保存失败'
+    saveStatus.value = 'error'
   } finally {
     saving.value = false
   }
 }
+
+watch(
+  () => ({
+    name: form.value.name,
+    description: form.value.description,
+    avatar: form.value.avatar,
+    instructions: form.value.instructions,
+    runtimeId: form.value.runtimeId,
+    model: form.value.model,
+    thinkingMode: form.value.thinkingMode,
+    maxConcurrency: form.value.maxConcurrency,
+  }),
+  () => scheduleAutoSave(),
+  { deep: true },
+)
+
+watch(
+  () => selectedRuntimeProvider.value,
+  () => {
+    if (hydratingForm) return
+    const opts = modelOptions.value
+    if (!opts.some((o) => o.value === form.value.model)) {
+      form.value.model = 'default'
+    }
+  },
+)
 
 function editName() {
   if (isArchived.value) return
@@ -303,7 +343,7 @@ async function saveSkills() {
       body: JSON.stringify({ skillIds: form.value.skillIds }),
     })
     agent.value = updated
-    syncForm(updated)
+    await syncForm(updated)
     okMsg.value = '能力已更新'
   } catch (e) {
     err.value = e instanceof Error ? e.message : '保存失败'
@@ -418,11 +458,12 @@ watch(agentId, () => {
 })
 
 onMounted(() => {
-  load()
-  timer = window.setInterval(load, 8000)
+  void load(false)
+  timer = window.setInterval(() => void load(true), 8000)
 })
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
+  if (autoSaveTimer) window.clearTimeout(autoSaveTimer)
 })
 </script>
 
@@ -660,13 +701,29 @@ onUnmounted(() => {
       </aside>
 
       <div class="set-body" v-if="settingsSection === 'general'">
-        <section class="set-block">
-          <h3>资料</h3>
-          <p class="panel-lead">管理该智能体在工作区内的展示方式。</p>
+        <section class="set-card">
+          <header class="set-card-head">
+            <h3>资料</h3>
+            <span
+              v-if="saveBadge"
+              class="save-badge"
+              :class="{
+                saving: saveStatus === 'saving',
+                saved: saveStatus === 'saved',
+                error: saveStatus === 'error',
+              }"
+            >
+              <span v-if="saveStatus === 'saved'" class="save-check">✓</span>
+              {{ saveBadge }}
+            </span>
+          </header>
 
-          <div class="field-row avatar-row">
-            <span class="label">头像</span>
-            <div class="avatar-edit">
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">头像</span>
+              <p class="hint">用于任务指派、动态和聊天中的展示。</p>
+            </div>
+            <div class="set-control avatar-edit">
               <AgentAvatar :src="form.avatar" :provider="agent.provider" :size="48" />
               <button type="button" class="btn-ghost" :disabled="isArchived" @click="showAvatarPicker = true">
                 更换
@@ -681,72 +738,123 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-          <label class="field">
-            <span class="label">名称</span>
-            <input
-              id="agent-name-input"
-              v-model="form.name"
-              type="text"
-              maxlength="64"
-              :disabled="isArchived"
-              placeholder="智能体名称"
-              @keydown.enter.prevent="saveProfile"
-            />
-          </label>
-          <label class="field">
-            <span class="label">描述</span>
-            <textarea
-              v-model="form.description"
-              rows="3"
-              maxlength="255"
-              :disabled="isArchived"
-              placeholder="这个智能体能做什么？"
-            />
-            <span class="counter">{{ form.description.length }} / 255</span>
-          </label>
-          <label class="field">
-            <span class="label">标签</span>
-            <input type="text" disabled placeholder="用于分类这个智能体的工作区标签。（二期）" />
-          </label>
-          <div class="set-actions">
-            <button type="button" class="btn-primary" :disabled="saving || isArchived" @click="saveProfile">
-              {{ saving ? '保存中…' : '保存资料' }}
-            </button>
+
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">名称</span>
+            </div>
+            <div class="set-control">
+              <input
+                id="agent-name-input"
+                v-model="form.name"
+                type="text"
+                maxlength="64"
+                :disabled="isArchived"
+                placeholder="智能体名称"
+              />
+            </div>
+          </div>
+
+          <div class="set-row top">
+            <div class="set-meta">
+              <span class="label">描述</span>
+            </div>
+            <div class="set-control">
+              <textarea
+                v-model="form.description"
+                rows="3"
+                maxlength="255"
+                :disabled="isArchived"
+                placeholder="这个智能体能做什么？"
+              />
+              <span class="counter">{{ form.description.length }} / 255</span>
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">标签</span>
+              <p class="hint">用于工作区分类（二期）。</p>
+            </div>
+            <div class="set-control">
+              <input type="text" disabled placeholder="添加标签…" />
+            </div>
           </div>
         </section>
 
-        <section class="set-block">
-          <h3>执行配置</h3>
-          <p class="panel-lead">选择运行时、模型、思考强度、速度和并行任务上限。</p>
+        <section class="set-card">
+          <header class="set-card-head">
+            <h3>执行配置</h3>
+          </header>
 
-          <label class="field">
-            <span class="label">运行时</span>
-            <select v-model="form.runtimeId">
-              <option v-for="r in runtimeOptions" :key="r.id" :value="r.id">
-                {{ runtimeOptionLabel(r) }}{{ r.status === 'online' ? '' : '（离线）' }}
-              </option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="label">模型</span>
-            <select disabled>
-              <option>默认</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="label">并发</span>
-            <input v-model.number="form.maxConcurrency" type="number" min="1" max="50" />
-            <span class="hint">最大并行 task 数 (1-50)</span>
-          </label>
-          <label class="field">
-            <span class="label">Instructions</span>
-            <textarea v-model="form.instructions" rows="6" placeholder="系统提示 / 行为准则" />
-          </label>
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">运行时</span>
+            </div>
+            <div class="set-control">
+              <select v-model="form.runtimeId" :disabled="isArchived">
+                <option v-for="r in runtimeOptions" :key="r.id" :value="r.id">
+                  {{ runtimeOptionLabel(r) }}{{ r.status === 'online' ? '' : '（离线）' }}
+                </option>
+              </select>
+            </div>
+          </div>
 
-          <div class="set-actions">
-            <button type="button" class="btn-primary" :disabled="saving || isArchived" @click="saveGeneral">
-              {{ saving ? '保存中…' : '保存更改' }}
-            </button>
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">模型</span>
+            </div>
+            <div class="set-control">
+              <select v-model="form.model" :disabled="isArchived">
+                <option v-for="m in modelOptions" :key="m.value" :value="m.value">
+                  {{ m.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">思考</span>
+            </div>
+            <div class="set-control">
+              <select v-model="form.thinkingMode" :disabled="isArchived">
+                <option v-for="t in THINKING_OPTIONS" :key="t.value" :value="t.value">
+                  {{ t.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="set-row">
+            <div class="set-meta">
+              <span class="label">并发</span>
+              <p class="hint">最大并行 task 数 (1-50)</p>
+            </div>
+            <div class="set-control">
+              <input
+                v-model.number="form.maxConcurrency"
+                type="number"
+                min="1"
+                max="50"
+                :disabled="isArchived"
+              />
+            </div>
+          </div>
+
+          <div class="set-row top">
+            <div class="set-meta">
+              <span class="label">Instructions</span>
+              <p class="hint">系统提示与行为准则。</p>
+            </div>
+            <div class="set-control">
+              <textarea
+                v-model="form.instructions"
+                rows="5"
+                :disabled="isArchived"
+                placeholder="系统提示 / 行为准则"
+              />
+            </div>
           </div>
         </section>
 
@@ -1168,44 +1276,99 @@ h1 { margin: 0; font-size: 24px; }
   color: var(--text);
   font-weight: 600;
 }
-.set-body { max-width: 560px; }
-.set-block {
-  margin-bottom: 28px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--border);
+.set-body { max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
+.set-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px 8px;
 }
-.set-block:last-child { border-bottom: none; }
-.set-block h3 { margin: 0 0 4px; font-size: 16px; }
-.field {
+.set-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.set-card-head h3 { margin: 0; font-size: 16px; }
+.save-badge {
+  font-size: 12px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.save-badge.saved { color: #047857; }
+.save-badge.saving { color: var(--muted); }
+.save-badge.error { color: var(--danger); }
+.save-check {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #d1fae5;
+  color: #047857;
+  font-size: 10px;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.set-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 32%) 1fr;
+  gap: 16px 24px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid #f3f4f6;
+}
+.set-row.top { align-items: flex-start; }
+.set-meta .label {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.set-meta .hint,
+.set-control .hint,
+.set-control .counter {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.set-control {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 14px;
-  font-size: 13px;
 }
-.field .label,
-.field-row .label {
-  font-weight: 600;
-  color: var(--text);
+.set-control.avatar-edit {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
 }
-.field input,
-.field textarea,
-.field select {
+.set-control input,
+.set-control textarea,
+.set-control select {
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   font: inherit;
   background: #fff;
+  box-sizing: border-box;
 }
-.field textarea { resize: vertical; }
-.counter, .hint { font-size: 12px; color: var(--muted); }
-.field-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
+.set-control textarea { resize: vertical; min-height: 72px; }
+.set-control input[type='number'] { max-width: 120px; }
+.set-block {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
 }
+.set-block h3 { margin: 0 0 4px; font-size: 16px; }
 .set-actions { margin-top: 8px; }
+@media (max-width: 700px) {
+  .set-row { grid-template-columns: 1fr; gap: 8px; }
+}
 
 .error { color: var(--danger); }
 .ok { color: #047857; font-size: 13px; }

@@ -8,12 +8,53 @@ export type Agent = {
   instructions?: string
   provider: string
   runtimeId?: string | null
+  model?: string
+  thinkingMode?: string
   maxConcurrency?: number
   status?: string
   skillIds?: string[]
   createdAt?: string
   updatedAt?: string
 }
+
+export type ModelOption = { value: string; label: string }
+
+/** 按 Provider 提供可选模型列表 */
+export function modelOptionsForProvider(provider?: string): ModelOption[] {
+  const p = (provider || '').toLowerCase()
+  if (p === 'claude_code' || p.startsWith('claude')) {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'claude-sonnet-4', label: 'Claude Sonnet' },
+      { value: 'claude-opus-4', label: 'Claude Opus' },
+      { value: 'claude-haiku', label: 'Claude Haiku' },
+    ]
+  }
+  if (p === 'cursor') {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'composer', label: 'Composer' },
+      { value: 'sonnet', label: 'Sonnet' },
+      { value: 'gpt-5', label: 'GPT-5' },
+    ]
+  }
+  if (p === 'codex' || p.startsWith('openai') || p === 'gpt') {
+    return [
+      { value: 'default', label: '默认' },
+      { value: 'gpt-5', label: 'GPT-5' },
+      { value: 'o3', label: 'o3' },
+      { value: 'gpt-4.1', label: 'GPT-4.1' },
+    ]
+  }
+  return [{ value: 'default', label: '默认' }]
+}
+
+export const THINKING_OPTIONS: ModelOption[] = [
+  { value: 'cli', label: '跟随 CLI 配置' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+]
 
 export type AgentFilter = 'mine' | 'all' | 'archived'
 

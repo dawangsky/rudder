@@ -46,6 +46,14 @@ public class AgentEntity {
     @TableField("runtime_id")
     private Long runtimeId;
 
+    /** 模型标识：default / sonnet / opus … */
+    @TableField("model")
+    private String model;
+
+    /** 思考强度：cli | low | medium | high */
+    @TableField("thinking_mode")
+    private String thinkingMode;
+
     /** 最大并发数 */
     @TableField("max_concurrency")
     private Integer maxConcurrency;
