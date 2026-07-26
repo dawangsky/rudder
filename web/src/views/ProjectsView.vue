@@ -20,6 +20,7 @@ import {
 } from '@/lib/projects'
 import { getWorkspaceId } from '@/lib/session'
 import { getHostBridge, isDesktopHost } from '@/lib/hostBridge'
+import type { Runtime } from '@/lib/runtimes'
 
 type ChipMenu = 'status' | 'priority' | 'assignee' | 'repo' | 'more' | null
 type RepoTab = 'github' | 'local'
@@ -47,6 +48,7 @@ const startDate = ref('')
 const dueDate = ref('')
 const openChip = ref<ChipMenu>(null)
 const isDesktop = isDesktopHost()
+const boundHost = ref('本机')
 
 const workspaceName = ref('工作区')
 
@@ -61,6 +63,9 @@ const memberById = computed(() => {
   for (const x of members.value) m.set(x.id, x)
   return m
 })
+
+const localSelectLabel = computed(() => localPath.value || '选择目录...')
+const boundHostLabel = computed(() => `绑定到 ${boundHost.value}`)
 
 const repoChipLabel = computed(() => {
   if (localPath.value) {
@@ -99,6 +104,29 @@ function priorityTone(level: ProjectPriority | string) {
       return 'none'
   }
 }
+
+async function resolveBoundHost() {
+  try {
+    if (isDesktop) {
+      const s = await getHostBridge().getDaemonStatus()
+      if (s.deviceName) {
+        boundHost.value = s.deviceName
+        return
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const rts = await apiFetch<Runtime[]>('/api/runtimes')
+    const online = rts.find((r) => (r.status || '').toLowerCase() === 'online' && r.hostName)
+    const any = rts.find((r) => r.hostName)
+    boundHost.value = online?.hostName || any?.hostName || '本机'
+  } catch {
+    boundHost.value = '本机'
+  }
+}
+
 async function load() {
   loading.value = true
   err.value = ''
@@ -113,6 +141,7 @@ async function load() {
     members.value = ms
     const current = workspaces.find((w) => String(w.id) === String(wsId))
     workspaceName.value = current?.name || current?.slug || '工作区'
+    void resolveBoundHost()
   } catch (e) {
     err.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -160,19 +189,22 @@ function applyRepoUrl() {
   openChip.value = null
 }
 
-function applyLocalPath() {
-  const v = localDraft.value.trim()
-  if (!v) return
-  localPath.value = v
-  openChip.value = null
-}
-
 async function pickLocalDirectory() {
-  const res = await getHostBridge().selectDirectory()
-  if (res.ok && res.path) {
-    localDraft.value = res.path
-    localPath.value = res.path
+  if (isDesktop) {
+    const res = await getHostBridge().selectDirectory()
+    if (res.ok && res.path) {
+      localDraft.value = res.path
+      localPath.value = res.path
+    }
+    return
   }
+  // 浏览器：退化为路径输入确认
+  const v = window.prompt('请输入本机绝对路径', localDraft.value || localPath.value || '')
+  if (v == null) return
+  const trimmed = v.trim()
+  if (!trimmed) return
+  localDraft.value = trimmed
+  localPath.value = trimmed
 }
 
 function clearRepo() {
@@ -505,34 +537,30 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
                   </div>
                 </div>
 
-                <div v-else class="repo-pane">
-                  <strong>为此项目关联本地目录</strong>
-                  <p>Agent 执行时优先使用该本机绝对路径作为工作目录。</p>
-                  <div v-if="localPath" class="linked">
-                    <span>{{ localPath }}</span>
-                    <button type="button" class="link-clear" @click="clearLocal">移除</button>
-                  </div>
-                  <div class="repo-row">
-                    <input
-                      v-model="localDraft"
-                      type="text"
-                      placeholder="/Users/you/code/app"
-                      @keydown.enter.prevent="applyLocalPath"
-                    />
-                    <button
-                      v-if="isDesktop"
-                      type="button"
-                      class="link-add"
-                      @click="pickLocalDirectory"
-                    >选择</button>
-                    <button
-                      v-else
-                      type="button"
-                      class="link-add"
-                      :disabled="!localDraft.trim()"
-                      @click="applyLocalPath"
-                    >添加</button>
-                  </div>
+                <div v-else class="repo-pane local-pane">
+                  <strong>使用本机的本地工作目录</strong>
+                  <p class="bound">{{ boundHostLabel }}</p>
+                  <button type="button" class="pick-dir" @click="pickLocalDirectory">
+                    <span class="pick-ico" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M4 8.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9.5a1 1 0 0 0-1-1h-6.5L11 6H5a1 1 0 0 0-1 1v1.5Z"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                        />
+                      </svg>
+                    </span>
+                    <span class="pick-text" :title="localPath || undefined">{{ localSelectLabel }}</span>
+                  </button>
+                  <button
+                    v-if="localPath"
+                    type="button"
+                    class="link-clear local-clear"
+                    @click="clearLocal"
+                  >清除已选目录</button>
+                  <p class="warn">
+                    其他机器上的 agent 看不到这个路径，会启动失败。需要协作请用仓库模式。
+                  </p>
                 </div>
               </div>
             </div>
@@ -925,6 +953,52 @@ tr:last-child td { border-bottom: none; }
   font-size: 12px;
   color: var(--muted);
   line-height: 1.45;
+}
+.local-pane {
+  gap: 10px;
+  padding-top: 6px;
+}
+.local-pane .bound {
+  margin-top: -4px;
+  color: #9ca3af;
+}
+.pick-dir {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: #f3f4f6;
+  color: #111827;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.pick-dir:hover { background: #e5e7eb; }
+.pick-ico {
+  display: inline-flex;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+.pick-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.local-clear {
+  align-self: center;
+  font-size: 12px;
+}
+.local-pane .warn {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #9ca3af;
+  line-height: 1.45;
+  text-align: left;
 }
 .linked {
   display: flex;
