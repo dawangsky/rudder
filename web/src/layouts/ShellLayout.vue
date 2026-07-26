@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * 侧栏对齐 Multica：账号头、搜索/新建、主导航、工作区、配置分组。
+ * 侧栏：账号/工作区切换、搜索/新建、主导航、配置分组。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import { getHostBridge } from '@/lib/hostBridge'
-import { clearSession, getSessionEmail } from '@/lib/session'
+import { clearSession, getSessionEmail, getWorkspaceId, setWorkspaceId } from '@/lib/session'
 
 type NavItem = {
   path?: string
@@ -14,6 +14,13 @@ type NavItem = {
   icon: keyof typeof icons
   badge?: 'unread'
   soon?: boolean
+}
+
+type WorkspaceItem = {
+  id: string
+  name: string
+  slug?: string
+  role?: string
 }
 
 const stroke =
@@ -41,6 +48,13 @@ const unread = ref(0)
 const userEmail = ref(getSessionEmail())
 const menuOpen = ref(false)
 const searchQ = ref('')
+const workspaces = ref<WorkspaceItem[]>([])
+const currentWorkspaceId = ref(getWorkspaceId())
+const workspaceBusy = ref(false)
+const showCreateWs = ref(false)
+const newWsName = ref('')
+const createWsErr = ref('')
+const createWsBusy = ref(false)
 let timer: number | undefined
 
 const displayName = computed(() => {
@@ -51,6 +65,22 @@ const displayName = computed(() => {
 })
 
 const avatarLetter = computed(() => (displayName.value[0] || 'R').toUpperCase())
+
+const currentWorkspace = computed(
+  () =>
+    workspaces.value.find((w) => String(w.id) === String(currentWorkspaceId.value)) ||
+    workspaces.value[0] ||
+    null,
+)
+
+const workspaceTitle = computed(
+  () => currentWorkspace.value?.name || currentWorkspace.value?.slug || '工作区',
+)
+
+const workspaceLetter = computed(() => {
+  const n = workspaceTitle.value.trim()
+  return (n[0] || 'W').toUpperCase()
+})
 
 const primaryNav: NavItem[] = [
   { path: '/inbox', label: '收件箱', icon: 'inbox', badge: 'unread' },
@@ -97,12 +127,85 @@ function onSearchKey(e: KeyboardEvent) {
   }
 }
 
+function letterOf(name?: string) {
+  const n = (name || 'W').trim()
+  return (n[0] || 'W').toUpperCase()
+}
+
 async function loadUnread() {
   try {
     const data = await apiFetch<{ unread: number }>('/api/inbox')
     unread.value = data.unread || 0
   } catch {
     unread.value = 0
+  }
+}
+
+async function loadWorkspaces() {
+  try {
+    const list = await apiFetch<WorkspaceItem[]>('/api/auth/workspaces')
+    workspaces.value = list
+    const id = getWorkspaceId()
+    if (id) currentWorkspaceId.value = id
+    else if (list[0]?.id) {
+      currentWorkspaceId.value = list[0].id
+      setWorkspaceId(list[0].id)
+    }
+  } catch {
+    workspaces.value = []
+  }
+}
+
+async function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+  if (menuOpen.value) await loadWorkspaces()
+}
+
+async function switchWorkspace(ws: WorkspaceItem) {
+  if (workspaceBusy.value) return
+  if (String(ws.id) === String(currentWorkspaceId.value)) {
+    menuOpen.value = false
+    return
+  }
+  workspaceBusy.value = true
+  try {
+    await apiFetch(`/api/auth/workspaces/${ws.id}/switch`, { method: 'POST' })
+    setWorkspaceId(ws.id)
+    currentWorkspaceId.value = ws.id
+    menuOpen.value = false
+    window.location.reload()
+  } catch {
+    /* keep menu open */
+  } finally {
+    workspaceBusy.value = false
+  }
+}
+
+function openCreateWorkspace() {
+  menuOpen.value = false
+  newWsName.value = ''
+  createWsErr.value = ''
+  showCreateWs.value = true
+}
+
+async function createWorkspace() {
+  const name = newWsName.value.trim()
+  if (!name || createWsBusy.value) return
+  createWsBusy.value = true
+  createWsErr.value = ''
+  try {
+    const ws = await apiFetch<WorkspaceItem>('/api/auth/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    })
+    setWorkspaceId(ws.id)
+    currentWorkspaceId.value = ws.id
+    showCreateWs.value = false
+    window.location.reload()
+  } catch (e) {
+    createWsErr.value = e instanceof Error ? e.message : '创建失败'
+  } finally {
+    createWsBusy.value = false
   }
 }
 
@@ -113,7 +216,6 @@ async function logout() {
   } catch {
     /* ignore */
   }
-  // 只清会话，保留本机账号登录记录
   clearSession()
   await router.replace({ name: 'login' })
 }
@@ -125,14 +227,15 @@ async function switchAccount() {
   } catch {
     /* ignore */
   }
-  // 切换账号同样保留历史记录，登录页可用下拉选择其它账号
   clearSession()
   await router.replace({ name: 'login', query: { switch: '1' } })
 }
 
 onMounted(() => {
   userEmail.value = getSessionEmail()
+  currentWorkspaceId.value = getWorkspaceId()
   loadUnread()
+  loadWorkspaces()
   timer = window.setInterval(loadUnread, 15000)
   window.addEventListener('keydown', onSearchKey)
 })
@@ -145,16 +248,78 @@ onUnmounted(() => {
 <template>
   <div class="shell">
     <aside class="sidebar">
-      <div class="account" @click.stop="menuOpen = !menuOpen">
-        <span class="avatar">{{ avatarLetter }}</span>
-        <span class="account-name" :title="userEmail">{{ displayName }}</span>
+      <div class="account" @click.stop="toggleMenu">
+        <span class="avatar">{{ workspaceLetter }}</span>
+        <span class="account-name" :title="workspaceTitle">{{ workspaceTitle }}</span>
         <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
         <div v-if="menuOpen" class="account-menu" @click.stop>
-          <div class="menu-email muted">{{ userEmail }}</div>
-          <button type="button" @click="switchAccount">切换账号</button>
-          <button type="button" @click="logout">退出登录</button>
+          <div class="menu-user">
+            <span class="user-av">{{ avatarLetter }}</span>
+            <div class="user-meta">
+              <strong>{{ displayName }}</strong>
+              <small>{{ userEmail }}</small>
+            </div>
+          </div>
+
+          <div class="menu-divider" />
+
+          <div class="menu-label">工作区</div>
+          <button
+            v-for="ws in workspaces"
+            :key="ws.id"
+            type="button"
+            class="ws-item"
+            :disabled="workspaceBusy"
+            @click="switchWorkspace(ws)"
+          >
+            <span class="ws-av">{{ letterOf(ws.name || ws.slug) }}</span>
+            <span class="ws-name">{{ ws.name || ws.slug }}</span>
+            <svg
+              v-if="String(ws.id) === String(currentWorkspaceId)"
+              class="check"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M5 12.5l4.5 4.5L19 7"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <button type="button" class="ws-item create" @click="openCreateWorkspace">
+            <span class="plus">+</span>
+            <span class="ws-name">创建工作区</span>
+          </button>
+
+          <div class="menu-divider" />
+
+          <button type="button" class="action" @click="switchAccount">切换账号</button>
+          <button type="button" class="action danger" @click="logout">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M10 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+              />
+              <path
+                d="M14 12H4m10 0 3.5-3.5M14 12l3.5 3.5"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            退出登录
+          </button>
         </div>
       </div>
 
@@ -198,7 +363,6 @@ onUnmounted(() => {
           class="nav-item"
           :class="{ active: isActive(item), soon: item.soon }"
           :title="item.soon ? '即将推出' : undefined"
-          :disabled="item.soon"
           @click="go(item)"
         >
           <span class="ico" v-html="icons[item.icon]" />
@@ -229,6 +393,37 @@ onUnmounted(() => {
     <main class="content" @click="menuOpen = false">
       <router-view />
     </main>
+
+    <div v-if="showCreateWs" class="ws-backdrop" @click.self="showCreateWs = false">
+      <div class="ws-modal" role="dialog" aria-modal="true" aria-labelledby="create-ws-title">
+        <h3 id="create-ws-title">创建工作区</h3>
+        <p class="ws-lead">新建后将切换到该工作区。</p>
+        <label>
+          名称
+          <input
+            v-model="newWsName"
+            type="text"
+            placeholder="例如：dev / 产品研发"
+            autofocus
+            @keydown.enter.prevent="createWorkspace"
+          />
+        </label>
+        <p v-if="createWsErr" class="ws-err">{{ createWsErr }}</p>
+        <div class="ws-actions">
+          <button type="button" class="btn-ghost" :disabled="createWsBusy" @click="showCreateWs = false">
+            取消
+          </button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="createWsBusy || !newWsName.trim()"
+            @click="createWorkspace"
+          >
+            {{ createWsBusy ? '创建中…' : '创建' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -281,36 +476,127 @@ onUnmounted(() => {
 }
 .account-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
-  right: 0;
+  width: min(280px, calc(100vw - 24px));
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-  padding: 6px;
-  z-index: 20;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  padding: 8px;
+  z-index: 40;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.menu-email {
+
+.menu-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 10px;
+}
+.user-av,
+.ws-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ws-av {
+  width: 26px;
+  height: 26px;
   font-size: 11px;
-  padding: 6px 8px;
+}
+.user-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.user-meta strong {
+  font-size: 14px;
+  font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.account-menu button {
+.user-meta small {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-divider {
+  height: 1px;
+  background: #f3f4f6;
+  margin: 4px 0;
+}
+.menu-label {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 8px 6px;
+  font-weight: 500;
+}
+.ws-item,
+.action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
   border: none;
   background: transparent;
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 8px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
+  color: var(--text);
 }
-.account-menu button:hover {
-  background: var(--bg);
+.ws-item:hover:not(:disabled),
+.action:hover {
+  background: #f3f4f6;
+}
+.ws-item:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.ws-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.check {
+  color: var(--text);
+  flex-shrink: 0;
+}
+.plus {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.action.danger {
+  color: #dc2626;
+  gap: 8px;
+}
+.action.danger:hover {
+  background: #fef2f2;
 }
 
 .quick {
@@ -454,5 +740,80 @@ kbd.solo {
 }
 .help-btn:hover {
   color: var(--text);
+}
+
+.ws-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 90;
+  padding: 16px;
+}
+.ws-modal {
+  width: min(400px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
+}
+.ws-modal h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.ws-lead {
+  margin: 6px 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ws-modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-modal input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+}
+.ws-err {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+.ws-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.btn-ghost {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-primary {
+  border: none;
+  background: #1c2333;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
