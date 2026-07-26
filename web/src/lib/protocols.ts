@@ -23,11 +23,19 @@ const allProtocols = ref<ProtocolRecord[]>(
 
 let loading: Promise<void> | null = null
 
-export const protocols = computed(() => allProtocols.value)
+function compareByLabel(a: ProtocolRecord, b: ProtocolRecord) {
+  const la = (a.label || a.value || '').trim()
+  const lb = (b.label || b.value || '').trim()
+  return la.localeCompare(lb, 'zh-Hans-CN', { sensitivity: 'base', numeric: true })
+}
+
+export const protocols = computed(() =>
+  [...allProtocols.value].sort(compareByLabel),
+)
 
 /** 已启用协议（创建运行时 / 智能体用） */
 export const enabledProtocols = computed(() =>
-  allProtocols.value.filter((p) => p.enabled !== false),
+  allProtocols.value.filter((p) => p.enabled !== false).sort(compareByLabel),
 )
 
 /** 不含 stub 的已启用协议（自定义运行时基础协议选择） */
