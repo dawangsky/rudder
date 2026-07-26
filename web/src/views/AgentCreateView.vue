@@ -40,7 +40,10 @@ const providerChoices = computed(() => {
 })
 
 const runtimeOptions = computed(() =>
-  onlineRuntimes.value.filter((r) => r.provider === form.value.provider),
+  onlineRuntimes.value.filter((r) => {
+    const base = r.baseProvider || baseProviderOf(r.provider)
+    return r.provider === form.value.provider || base === form.value.provider
+  }),
 )
 
 async function load() {

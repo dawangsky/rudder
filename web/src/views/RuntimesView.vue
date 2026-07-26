@@ -13,6 +13,7 @@ import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import {
   formatHeartbeat,
   groupMachines,
+  iconProvider,
   looksLikeIp,
   providerLabel,
   type LocalMachineHint,
@@ -231,7 +232,7 @@ onUnmounted(() => {
               <ProviderIcon
                 v-for="r in m.runtimes"
                 :key="r.id"
-                :provider="r.provider"
+                :provider="iconProvider(r)"
                 :custom-src="customIconFor(r)"
                 :title="providerLabel(r)"
                 :size="22"
