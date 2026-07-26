@@ -115,8 +115,15 @@ const runtimeLabelText = computed(() => {
   return host ? `${displayName(rt)} (${host})` : displayName(rt)
 })
 
+/** Issue 分配/提及产生的工作；chat 会话不算「工作」 */
+function isIssueWorkTask(t: Task) {
+  if (t.issueId) return true
+  const src = (t.triggerSource || '').toLowerCase()
+  return src === 'assign' || src === 'mention'
+}
+
 const agentTasks = computed(() =>
-  tasks.value.filter((t) => t.agentId === agentId.value),
+  tasks.value.filter((t) => t.agentId === agentId.value && isIssueWorkTask(t)),
 )
 
 const activeTasks = computed(() =>
