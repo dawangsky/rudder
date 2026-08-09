@@ -18,8 +18,39 @@ export type RuntimeSkill = {
   name: string
   description?: string
   sourcePath: string
+  /** 展示用路径（如 ~/.agents/skills/foo） */
+  displayPath?: string
   contentHash?: string
   reportedAt?: string
+  /** 来源根目录标签：claude / agents / cursor… */
+  origin?: string
+  fileCount?: number
+  /** Desktop 本地扫描时带内容，可直接 POST /api/skills */
+  content?: string
+  /** local = 本机扫描；reported = Daemon 上报缓存 */
+  source?: 'local' | 'reported'
+}
+
+export function skillOriginFromPath(sourcePath?: string): string {
+  if (!sourcePath) return 'local'
+  const p = sourcePath.replace(/\\/g, '/').toLowerCase()
+  if (p.includes('/.claude/')) return 'claude'
+  if (p.includes('/.agents/')) return 'agents'
+  // 仅 skills 目录；排除 skills-*（如 skills-cursor）
+  if (/\/\.cursor\/skills(\/|$)/.test(p)) return 'cursor'
+  if (p.includes('/.codex/')) return 'codex'
+  if (p.includes('/.openclaw/')) return 'openclaw'
+  return 'local'
+}
+
+/** 将绝对路径收成展示用目录（去掉 SKILL.md；尽量保留 ~/.…）。 */
+export function formatSkillDisplayPath(sourcePath?: string): string {
+  if (!sourcePath) return ''
+  let p = sourcePath.replace(/\\/g, '/')
+  if (p.toLowerCase().endsWith('/skill.md')) {
+    p = p.slice(0, -'/skill.md'.length)
+  }
+  return p
 }
 
 export type SkillUrlPreview = {

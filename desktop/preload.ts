@@ -1,7 +1,7 @@
 /**
  * preload：向渲染进程暴露窄接口 window.rudderHost，业务代码不直接依赖 Electron。
  */
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('rudderHost', {
   getDaemonStatus: () => ipcRenderer.invoke('daemon:status'),
@@ -30,4 +30,12 @@ contextBridge.exposeInMainWorld('rudderHost', {
     description?: string
   }) => ipcRenderer.invoke('runtime:add-custom', payload),
   selectDirectory: () => ipcRenderer.invoke('dialog:select-directory'),
+  scanLocalSkills: () => ipcRenderer.invoke('skills:scan-local'),
+  onClosePrompt: (handler: () => void) => {
+    const listener = (_evt: IpcRendererEvent) => handler()
+    ipcRenderer.on('app:close-prompt', listener)
+    return () => ipcRenderer.removeListener('app:close-prompt', listener)
+  },
+  resolveClosePrompt: (payload: { action: string; askEveryTime: boolean }) =>
+    ipcRenderer.invoke('app:close-decision', payload),
 })

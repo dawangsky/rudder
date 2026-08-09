@@ -7,9 +7,12 @@ import { apiFetch } from '@/lib/api'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import ActionIcon from '@/components/ActionIcon.vue'
+import { getHostBridge, isDesktopHost } from '@/lib/hostBridge'
 import {
   defaultSkillMarkdown,
+  formatSkillDisplayPath,
   formatSkillTime,
+  skillOriginFromPath,
   sourceLabel,
   type RuntimeSkill,
   type Skill,
@@ -41,10 +44,31 @@ const runtimeSkills = ref<RuntimeSkill[]>([])
 const runtimeSkillLoading = ref(false)
 const selectedRuntimeSkillIds = ref<string[]>([])
 const runtimeErr = ref('')
+const runtimeQuery = ref('')
 
 const onlineRuntimes = computed(() =>
   runtimes.value.filter((r) => (r.status || '').toLowerCase() === 'online'),
 )
+
+const selectedRuntime = computed(() =>
+  onlineRuntimes.value.find((r) => r.id === selectedRuntimeId.value) || null,
+)
+
+const filteredRuntimeSkills = computed(() => {
+  const q = runtimeQuery.value.trim().toLowerCase()
+  if (!q) return runtimeSkills.value
+  return runtimeSkills.value.filter((s) => {
+    const hay = `${s.name} ${s.description || ''} ${s.displayPath || s.sourcePath} ${s.origin || ''}`.toLowerCase()
+    return hay.includes(q)
+  })
+})
+
+const allFilteredSelected = computed(() => {
+  const list = filteredRuntimeSkills.value
+  return list.length > 0 && list.every((s) => selectedRuntimeSkillIds.value.includes(s.id))
+})
+
+const selectedCount = computed(() => selectedRuntimeSkillIds.value.length)
 
 async function load() {
   loading.value = true
@@ -75,6 +99,7 @@ function openCreate() {
   selectedRuntimeId.value = onlineRuntimes.value[0]?.id || ''
   runtimeSkills.value = []
   selectedRuntimeSkillIds.value = []
+  runtimeQuery.value = ''
   showCreate.value = true
 }
 
@@ -85,7 +110,10 @@ function closeCreate() {
 
 function choose(s: Step) {
   step.value = s
-  if (s === 'runtime' && selectedRuntimeId.value) {
+  if (s === 'runtime') {
+    if (!selectedRuntimeId.value && onlineRuntimes.value[0]) {
+      selectedRuntimeId.value = onlineRuntimes.value[0].id
+    }
     void loadRuntimeSkills()
   }
 }
@@ -159,18 +187,66 @@ async function importUrl() {
   }
 }
 
+function normalizeReported(list: RuntimeSkill[]): RuntimeSkill[] {
+  return list.map((s) => ({
+    ...s,
+    source: 'reported' as const,
+    origin: s.origin || skillOriginFromPath(s.sourcePath),
+    displayPath: s.displayPath || formatSkillDisplayPath(s.sourcePath),
+    fileCount: s.fileCount ?? 1,
+  }))
+}
+
 async function loadRuntimeSkills() {
   runtimeSkills.value = []
   selectedRuntimeSkillIds.value = []
   runtimeErr.value = ''
-  if (!selectedRuntimeId.value) return
   runtimeSkillLoading.value = true
   try {
-    runtimeSkills.value = await apiFetch<RuntimeSkill[]>(
+    // Desktop：直接扫本机磁盘（与目标 UI 一致，不依赖 Daemon 上报缓存）
+    if (isDesktopHost()) {
+      const res = await getHostBridge().scanLocalSkills()
+      if (res.ok && res.skills.length) {
+        runtimeSkills.value = res.skills.map((s) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          sourcePath: s.sourcePath,
+          displayPath: s.displayPath,
+          contentHash: s.contentHash,
+          origin: s.origin,
+          fileCount: s.fileCount,
+          content: s.content,
+          source: 'local',
+        }))
+        return
+      }
+      if (res.message && !res.ok) {
+        runtimeErr.value = res.message
+      }
+    }
+
+    if (!selectedRuntimeId.value) {
+      if (!runtimeSkills.value.length) {
+        runtimeErr.value = onlineRuntimes.value.length
+          ? '请选择运行时'
+          : '当前没有在线运行时。请先启动本机 Daemon。'
+      }
+      return
+    }
+
+    const reported = await apiFetch<RuntimeSkill[]>(
       `/api/runtimes/${selectedRuntimeId.value}/skills`,
     )
+    if (reported.length) {
+      runtimeSkills.value = normalizeReported(reported)
+      return
+    }
+
     if (!runtimeSkills.value.length) {
-      runtimeErr.value = '该运行时尚未上报 skill。请确认本机 Daemon 在线，且已安装 SKILL.md。'
+      runtimeErr.value = isDesktopHost()
+        ? '本机未发现 SKILL.md。常见目录：~/.agents/skills、~/.claude/skills、~/.cursor/skills。'
+        : '该运行时尚未上报 skill。请确认本机 Daemon 在线，且已安装 SKILL.md。'
     }
   } catch (e) {
     runtimeErr.value = e instanceof Error ? e.message : '加载失败'
@@ -186,27 +262,56 @@ function toggleRuntimeSkill(id: string) {
   selectedRuntimeSkillIds.value = [...set]
 }
 
+function toggleSelectAllFiltered() {
+  const ids = filteredRuntimeSkills.value.map((s) => s.id)
+  if (!ids.length) return
+  if (allFilteredSelected.value) {
+    const drop = new Set(ids)
+    selectedRuntimeSkillIds.value = selectedRuntimeSkillIds.value.filter((id) => !drop.has(id))
+  } else {
+    const set = new Set(selectedRuntimeSkillIds.value)
+    for (const id of ids) set.add(id)
+    selectedRuntimeSkillIds.value = [...set]
+  }
+}
+
 async function promoteRuntimeSkills() {
-  if (!selectedRuntimeId.value || !selectedRuntimeSkillIds.value.length) {
+  if (!selectedRuntimeSkillIds.value.length) {
     runtimeErr.value = '请至少选择一个 skill'
     return
   }
   busy.value = true
   runtimeErr.value = ''
   try {
+    const byId = new Map(runtimeSkills.value.map((s) => [s.id, s]))
     for (const skillId of selectedRuntimeSkillIds.value) {
-      await apiFetch('/api/skills/from-runtime', {
-        method: 'POST',
-        body: JSON.stringify({
-          runtimeId: selectedRuntimeId.value,
-          skillId,
-        }),
-      })
+      const sk = byId.get(skillId)
+      if (!sk) continue
+      if (sk.source === 'local' && sk.content) {
+        await apiFetch('/api/skills', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: sk.name,
+            description: sk.description || undefined,
+            content: sk.content,
+            sourceType: 'runtime',
+            sourceRef: sk.sourcePath,
+          }),
+        })
+      } else if (selectedRuntimeId.value) {
+        await apiFetch('/api/skills/from-runtime', {
+          method: 'POST',
+          body: JSON.stringify({
+            runtimeId: selectedRuntimeId.value,
+            skillId,
+          }),
+        })
+      }
     }
     showCreate.value = false
     await load()
   } catch (e) {
-    runtimeErr.value = e instanceof Error ? e.message : '复制失败'
+    runtimeErr.value = e instanceof Error ? e.message : '导入失败'
   } finally {
     busy.value = false
   }
@@ -238,7 +343,17 @@ async function confirmDelete() {
 function runtimeOptionLabel(r: Runtime) {
   const host = r.hostName || ''
   const name = displayName(r) || providerLabel(r)
-  return host ? `${name} · ${host}` : name
+  return host ? `${name} (${host})` : name
+}
+
+function skillTag(s: RuntimeSkill) {
+  // 与目标 UI 一致：优先展示所选运行时短名；否则回退到来源目录标签
+  if (selectedRuntime.value) return displayName(selectedRuntime.value).toLowerCase()
+  return s.origin || skillOriginFromPath(s.sourcePath)
+}
+
+function skillPath(s: RuntimeSkill) {
+  return s.displayPath || formatSkillDisplayPath(s.sourcePath)
 }
 
 onMounted(load)
@@ -340,20 +455,33 @@ onMounted(load)
     </div>
 
     <div v-if="showCreate" class="modal-backdrop" @click.self="closeCreate">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="skill-create-title">
+      <div
+        class="modal"
+        :class="{ 'modal-wide': step === 'runtime' }"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="skill-create-title"
+      >
         <div class="modal-head">
-          <div>
+          <div class="modal-head-main">
             <button
               v-if="step !== 'picker'"
               type="button"
-              class="back"
+              class="back-icon"
+              aria-label="返回"
               @click="step = 'picker'"
-            >← 返回</button>
-            <h3 id="skill-create-title">新建 skill</h3>
-            <p v-if="step === 'picker'" class="modal-lead">选择一种方式把 skill 添加到工作区。</p>
-            <p v-else-if="step === 'manual'" class="modal-lead">从空白 SKILL.md 开始，自己写指令。</p>
-            <p v-else-if="step === 'url'" class="modal-lead">从 ClawHub 或 Skills.sh 拉取已发布的 skill。</p>
-            <p v-else class="modal-lead">把本地运行时里已经装好的 skill 提升过来。</p>
+            >
+              ←
+            </button>
+            <div>
+              <h3 id="skill-create-title">
+                {{ step === 'runtime' ? '从运行时复制' : '新建 skill' }}
+              </h3>
+              <p v-if="step === 'picker'" class="modal-lead">选择一种方式把 skill 添加到工作区。</p>
+              <p v-else-if="step === 'manual'" class="modal-lead">从空白 SKILL.md 开始，自己写指令。</p>
+              <p v-else-if="step === 'url'" class="modal-lead">从 ClawHub 或 Skills.sh 拉取已发布的 skill。</p>
+              <p v-else class="modal-lead">扫描本地运行时，把它磁盘上的 skill 提升到工作区。</p>
+            </div>
           </div>
           <button type="button" class="modal-x" aria-label="关闭" @click="closeCreate">×</button>
         </div>
@@ -426,8 +554,8 @@ onMounted(load)
           </div>
         </div>
 
-        <div v-else class="form">
-          <label>
+        <div v-else class="runtime-panel">
+          <label class="rt-label">
             运行时
             <select v-model="selectedRuntimeId">
               <option disabled value="">选择在线运行时</option>
@@ -436,35 +564,89 @@ onMounted(load)
               </option>
             </select>
           </label>
+
+          <div v-if="selectedRuntime" class="rt-card">
+            <span class="rt-card-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6" />
+                <path d="M8 20h8M12 18v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+            </span>
+            <div class="rt-card-text">
+              <strong>{{ displayName(selectedRuntime) }}</strong>
+              <small>{{ selectedRuntime.hostName || '本机' }}</small>
+            </div>
+            <span
+              class="rt-status"
+              :class="{ online: (selectedRuntime.status || '').toLowerCase() === 'online' }"
+            >
+              {{ (selectedRuntime.status || '').toLowerCase() === 'online' ? 'online' : (selectedRuntime.status || 'offline') }}
+            </span>
+          </div>
+
           <p v-if="!onlineRuntimes.length" class="hint">
             当前没有在线运行时。请先启动本机 Daemon，并确保已连接运行时。
           </p>
-          <p v-if="runtimeSkillLoading" class="muted">正在加载…</p>
-          <ul v-else-if="runtimeSkills.length" class="rt-skills">
-            <li v-for="rs in runtimeSkills" :key="rs.id">
-              <label>
-                <input
-                  type="checkbox"
-                  :checked="selectedRuntimeSkillIds.includes(rs.id)"
-                  @change="toggleRuntimeSkill(rs.id)"
-                />
-                <span>
-                  <strong>{{ rs.name }}</strong>
-                  <small>{{ rs.description || rs.sourcePath }}</small>
-                </span>
-              </label>
-            </li>
-          </ul>
+
+          <div v-if="runtimeSkillLoading" class="rt-loading muted">正在扫描本机 skill…</div>
+
+          <template v-else-if="runtimeSkills.length">
+            <div class="rt-search">
+              <span class="rt-search-icon" aria-hidden="true">⌕</span>
+              <input v-model="runtimeQuery" type="search" placeholder="搜索本地 skill" />
+            </div>
+
+            <label class="rt-select-all">
+              <input
+                type="checkbox"
+                :checked="allFilteredSelected"
+                @change="toggleSelectAllFiltered"
+              />
+              全选 ({{ filteredRuntimeSkills.length }})
+            </label>
+
+            <ul class="rt-skills">
+              <li v-for="rs in filteredRuntimeSkills" :key="rs.id">
+                <label class="rt-skill">
+                  <input
+                    type="checkbox"
+                    :checked="selectedRuntimeSkillIds.includes(rs.id)"
+                    @change="toggleRuntimeSkill(rs.id)"
+                  />
+                  <span class="rt-skill-body">
+                    <span class="rt-skill-top">
+                      <span class="rt-skill-title">
+                        <strong>{{ rs.name }}</strong>
+                        <span class="rt-tag">{{ skillTag(rs) }}</span>
+                      </span>
+                      <span class="rt-files">{{ rs.fileCount ?? 1 }}个文件</span>
+                    </span>
+                    <span class="rt-skill-desc">{{ rs.description || '暂无描述' }}</span>
+                    <span class="rt-skill-path">{{ skillPath(rs) }}</span>
+                  </span>
+                </label>
+              </li>
+            </ul>
+          </template>
+
           <p v-if="runtimeErr" class="error">{{ runtimeErr }}</p>
-          <div class="modal-actions">
-            <button type="button" class="btn-ghost" :disabled="busy" @click="closeCreate">取消</button>
+
+          <div class="rt-footer">
+            <span class="rt-footer-hint">
+              {{
+                selectedCount
+                  ? `已选择 ${selectedCount} 个 skill`
+                  : '请选择一个 skill 继续。'
+              }}
+            </span>
             <button
               type="button"
-              class="btn-add"
-              :disabled="busy || !selectedRuntimeSkillIds.length"
+              class="btn-add btn-import"
+              :disabled="busy || !selectedCount"
               @click="promoteRuntimeSkills"
             >
-              {{ busy ? '复制中…' : '复制到工作区' }}
+              <span aria-hidden="true">⇩</span>
+              {{ busy ? '导入中…' : '导入到工作区' }}
             </button>
           </div>
         </div>
@@ -545,7 +727,6 @@ h2 {
   justify-content: center;
   text-align: center;
   gap: 10px;
-  /* 相对视口垂直居中再略偏下 */
   padding: 8vh 20px 22vh;
   margin-top: 0;
 }
@@ -634,24 +815,40 @@ tr:last-child td { border-bottom: none; }
   max-height: min(90vh, 720px);
   overflow: auto;
 }
+.modal-wide {
+  width: min(640px, 100%);
+  max-height: min(92vh, 820px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .modal-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
   margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.modal-head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
 }
 .modal-head h3 { margin: 0; font-size: 18px; }
 .modal-lead { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
-.back {
+.back-icon {
   border: none;
   background: transparent;
-  color: #2563eb;
-  padding: 0;
-  margin-bottom: 6px;
-  font-size: 13px;
+  color: var(--text);
+  padding: 2px 4px 0 0;
+  font-size: 18px;
+  line-height: 1.2;
   cursor: pointer;
+  flex-shrink: 0;
 }
+.back-icon:hover { color: #2563eb; }
 .modal-x {
   border: none;
   background: transparent;
@@ -705,7 +902,9 @@ tr:last-child td { border-bottom: none; }
 }
 .form input,
 .form textarea,
-.form select {
+.form select,
+.rt-label select,
+.rt-search input {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
@@ -744,27 +943,189 @@ tr:last-child td { border-bottom: none; }
   max-height: 220px;
   overflow: auto;
 }
+
+.runtime-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.rt-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.rt-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+.rt-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #4338ca;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.rt-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.rt-card-text strong { font-size: 13px; font-weight: 650; }
+.rt-card-text small { font-size: 12px; color: var(--muted); }
+.rt-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: lowercase;
+}
+.rt-status.online { color: #16a34a; }
+.rt-loading { margin: 8px 0 12px; font-size: 13px; }
+.rt-search {
+  position: relative;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.rt-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9ca3af;
+  font-size: 14px;
+  pointer-events: none;
+}
+.rt-search input {
+  width: 100%;
+  padding-left: 30px;
+  box-sizing: border-box;
+}
+.rt-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  color: var(--text);
+}
 .rt-skills {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
-  max-height: 260px;
   overflow: auto;
+  flex: 1;
+  min-height: 180px;
+  max-height: min(42vh, 360px);
 }
 .rt-skills li { border-bottom: 1px solid var(--border); }
 .rt-skills li:last-child { border-bottom: none; }
-.rt-skills label {
+.rt-skill {
   display: flex;
-  flex-direction: row;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 12px;
   margin: 0;
   font-weight: 400;
   cursor: pointer;
 }
-.rt-skills strong { display: block; font-size: 13px; }
-.rt-skills small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.rt-skill:hover { background: #f9fafb; }
+.rt-skill > input { margin-top: 3px; flex-shrink: 0; }
+.rt-skill-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.rt-skill-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rt-skill-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.rt-skill-title strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+.rt-tag {
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.rt-files {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.rt-skill-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rt-skill-path {
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.rt-footer-hint {
+  font-size: 13px;
+  color: var(--muted);
+}
+.btn-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 </style>

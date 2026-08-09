@@ -17,11 +17,15 @@ export type DaemonStatus = {
   cliEnsureMessage?: string
   autoStartOnLaunch?: boolean
   autoStopOnQuit?: boolean
+  closeAction?: CloseAction
 }
+
+export type CloseAction = 'ask' | 'quit' | 'minimize'
 
 export type DaemonPrefs = {
   autoStartOnLaunch: boolean
   autoStopOnQuit: boolean
+  closeAction: CloseAction
 }
 
 export type DaemonAccount = {
@@ -40,6 +44,25 @@ export type DaemonCredentialsPayload = {
   email: string
   daemonToken: string
   server: string
+}
+
+/** Desktop 本机扫描到的 skill（含完整 SKILL.md 内容，可直接导入）。 */
+export type LocalScannedSkill = {
+  id: string
+  name: string
+  description: string
+  content: string
+  sourcePath: string
+  displayPath: string
+  contentHash: string
+  origin: string
+  fileCount: number
+}
+
+export type ScanLocalSkillsResult = {
+  ok: boolean
+  skills: LocalScannedSkill[]
+  message?: string
 }
 
 type HostBridgeApi = {
@@ -63,6 +86,12 @@ type HostBridgeApi = {
     description?: string
   }) => Promise<RuntimeActionResult>
   selectDirectory: () => Promise<{ ok: boolean; path: string }>
+  scanLocalSkills: () => Promise<ScanLocalSkillsResult>
+  onClosePrompt: (handler: () => void) => () => void
+  resolveClosePrompt: (payload: {
+    action: 'quit' | 'minimize' | 'cancel'
+    askEveryTime: boolean
+  }) => Promise<{ ok: boolean }>
 }
 
 declare global {
@@ -98,10 +127,15 @@ export function getHostBridge(): HostBridgeApi {
       return { running: false, message: '非 Desktop 环境' }
     },
     async getDaemonPrefs() {
-      return { autoStartOnLaunch: true, autoStopOnQuit: false }
+      return { autoStartOnLaunch: true, autoStopOnQuit: false, closeAction: 'ask' as const }
     },
     async setDaemonPrefs(partial) {
-      return { autoStartOnLaunch: true, autoStopOnQuit: false, ...partial }
+      return {
+        autoStartOnLaunch: true,
+        autoStopOnQuit: false,
+        closeAction: 'ask' as const,
+        ...partial,
+      }
     },
     async applyDaemonCredentials() {
       return { ok: false, message: '非 Desktop 环境：请执行 rudder login' }
@@ -129,6 +163,15 @@ export function getHostBridge(): HostBridgeApi {
     },
     async selectDirectory() {
       return { ok: false, path: '' }
+    },
+    async scanLocalSkills() {
+      return { ok: false, skills: [], message: '非 Desktop 环境：无法扫描本机 skill' }
+    },
+    onClosePrompt() {
+      return () => undefined
+    },
+    async resolveClosePrompt() {
+      return { ok: false }
     },
   }
 }

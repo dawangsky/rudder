@@ -6,20 +6,25 @@
  * - 启动时若有凭证且 autoStartOnLaunch 则自动拉起
  * - 登录后由渲染进程写入凭证并 restart
  */
-import { app, BrowserWindow, ipcMain, dialog, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { spawn, type ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import { ensureDaemon, type EnsureDaemonResult } from './scripts/ensure-daemon'
+import { scanLocalSkills } from './skills-scan'
 
 const WEB_DEV_URL = process.env.RUDDER_WEB_URL || 'http://127.0.0.1:5173'
 const DESKTOP_PROFILE = 'desktop'
 
+type CloseAction = 'ask' | 'quit' | 'minimize'
+
 type DesktopPrefs = {
   autoStartOnLaunch: boolean
   autoStopOnQuit: boolean
+  /** 点关闭按钮：每次询问 / 直接退出 / 直接最小化 */
+  closeAction: CloseAction
 }
 
 type Credentials = {
@@ -31,9 +36,14 @@ type Credentials = {
 type CliResult = { code: number; out: string; err: string }
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
 let daemonChild: ChildProcess | null = null
 /** 本次进程内记录的启动时间（用于 Uptime 展示） */
 let daemonStartedAt: number | null = null
+/** 用户确认退出或系统即将退出时置位，避免 close 拦截循环 */
+let isQuitting = false
+/** 关闭确认弹窗打开中，避免重复弹出 */
+let closePromptOpen = false
 /** ensure-daemon 结果 */
 let daemonEnsure: EnsureDaemonResult = {
   ok: false,
@@ -96,19 +106,37 @@ function defaultPrefs(): DesktopPrefs {
   return {
     autoStartOnLaunch: true,
     autoStopOnQuit: false,
+    closeAction: 'ask',
   }
+}
+
+function normalizeCloseAction(raw: unknown): CloseAction {
+  if (raw === 'quit' || raw === 'minimize' || raw === 'ask') return raw
+  return 'ask'
 }
 
 function readPrefs(): DesktopPrefs {
   try {
-    return { ...defaultPrefs(), ...JSON.parse(fs.readFileSync(prefsPath(), 'utf8')) }
+    const raw = JSON.parse(fs.readFileSync(prefsPath(), 'utf8')) as Partial<DesktopPrefs>
+    return {
+      ...defaultPrefs(),
+      ...raw,
+      closeAction: normalizeCloseAction(raw.closeAction),
+    }
   } catch {
     return defaultPrefs()
   }
 }
 
 function writePrefs(partial: Partial<DesktopPrefs>): DesktopPrefs {
-  const next = { ...readPrefs(), ...partial }
+  const cur = readPrefs()
+  const next: DesktopPrefs = {
+    ...cur,
+    ...partial,
+    closeAction: normalizeCloseAction(
+      partial.closeAction !== undefined ? partial.closeAction : cur.closeAction,
+    ),
+  }
   fs.mkdirSync(profileHome(), { recursive: true, mode: 0o700 })
   fs.writeFileSync(prefsPath(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
   return next
@@ -172,6 +200,121 @@ function createWindow() {
     },
   })
   void mainWindow.loadURL(WEB_DEV_URL)
+
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return
+    const action = readPrefs().closeAction
+    if (action === 'quit') {
+      isQuitting = true
+      return
+    }
+    event.preventDefault()
+    if (action === 'minimize') {
+      hideToTray()
+      return
+    }
+    void promptCloseAction()
+  })
+}
+
+function resolveTrayIcon() {
+  const candidates = [
+    path.join(__dirname, '..', 'assets', 'tray.png'),
+    path.join(__dirname, 'assets', 'tray.png'),
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      const img = nativeImage.createFromPath(p)
+      if (!img.isEmpty()) return img
+    }
+  }
+  return nativeImage.createEmpty()
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function ensureTray() {
+  if (tray) return
+  tray = new Tray(resolveTrayIcon())
+  tray.setToolTip('Rudder')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: '显示窗口',
+        click: () => showMainWindow(),
+      },
+      { type: 'separator' },
+      {
+        label: '退出 Rudder',
+        click: () => {
+          isQuitting = true
+          app.quit()
+        },
+      },
+    ]),
+  )
+  tray.on('click', () => showMainWindow())
+  tray.on('double-click', () => showMainWindow())
+}
+
+function hideToTray() {
+  ensureTray()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide()
+  }
+}
+
+async function promptCloseAction() {
+  if (!mainWindow || closePromptOpen) return
+  const wc = mainWindow.webContents
+  if (wc.isDestroyed() || wc.isLoading()) {
+    closePromptOpen = true
+    try {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        title: '关闭 Rudder',
+        message: '关闭窗口后如何处理？',
+        detail: '可最小化到系统托盘在后台运行，或直接退出程序。',
+        buttons: ['最小化到托盘', '退出程序', '取消'],
+        defaultId: 0,
+        cancelId: 2,
+        checkboxLabel: '不再提示，记住本次选择',
+        checkboxChecked: false,
+        noLink: true,
+      })
+      // 系统对话框：勾选 = 记住；askEveryTime = !checkbox
+      applyCloseDecision(
+        result.response === 0 ? 'minimize' : result.response === 1 ? 'quit' : 'cancel',
+        !result.checkboxChecked,
+      )
+    } finally {
+      closePromptOpen = false
+    }
+    return
+  }
+  closePromptOpen = true
+  wc.send('app:close-prompt')
+}
+
+function applyCloseDecision(action: 'quit' | 'minimize' | 'cancel', askEveryTime: boolean) {
+  closePromptOpen = false
+  if (action === 'cancel') return
+  if (action === 'quit') {
+    writePrefs({ closeAction: askEveryTime ? 'ask' : 'quit' })
+    isQuitting = true
+    app.quit()
+    return
+  }
+  writePrefs({ closeAction: askEveryTime ? 'ask' : 'minimize' })
+  hideToTray()
 }
 
 function runCli(args: string[]): Promise<CliResult> {
@@ -263,6 +406,7 @@ async function buildStatus() {
     cliEnsureMessage: daemonEnsure.message || '',
     autoStartOnLaunch: !!prefs.autoStartOnLaunch,
     autoStopOnQuit: !!prefs.autoStopOnQuit,
+    closeAction: prefs.closeAction,
     message: email
       ? running
         ? `Daemon 运行中 · desktop · v${cliVersion || '?'} · ${email}`
@@ -292,6 +436,21 @@ ipcMain.handle('daemon:prefs', async (_evt: IpcMainInvokeEvent, partial?: Partia
   }
   return readPrefs()
 })
+
+ipcMain.handle(
+  'app:close-decision',
+  async (
+    _evt: IpcMainInvokeEvent,
+    payload?: { action?: string; askEveryTime?: boolean },
+  ) => {
+    const action =
+      payload?.action === 'quit' || payload?.action === 'minimize' || payload?.action === 'cancel'
+        ? payload.action
+        : 'cancel'
+    applyCloseDecision(action, payload?.askEveryTime !== false)
+    return { ok: true }
+  },
+)
 
 ipcMain.handle(
   'daemon:apply-credentials',
@@ -391,6 +550,16 @@ ipcMain.handle('dialog:select-directory', async () => {
   return { ok: true, path: result.filePaths[0] }
 })
 
+ipcMain.handle('skills:scan-local', async () => {
+  try {
+    const skills = scanLocalSkills()
+    return { ok: true, skills }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : '扫描失败'
+    return { ok: false, skills: [], message }
+  }
+})
+
 app.whenReady().then(async () => {
   // 启动前对齐 Daemon 版本，避免落后二进制导致协议探测等功能缺失
   daemonEnsure = ensureDaemon()
@@ -412,6 +581,7 @@ app.whenReady().then(async () => {
   }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    else showMainWindow()
   })
 })
 
@@ -428,6 +598,11 @@ app.on('window-all-closed', async () => {
 })
 
 app.on('before-quit', async () => {
+  isQuitting = true
+  if (tray) {
+    tray.destroy()
+    tray = null
+  }
   const prefs = readPrefs()
   if (!prefs.autoStopOnQuit) return
   try {
