@@ -45,6 +45,9 @@ const runtimeSkillLoading = ref(false)
 const selectedRuntimeSkillIds = ref<string[]>([])
 const runtimeErr = ref('')
 const runtimeQuery = ref('')
+/** 仅选中 1 个时，可编辑导入到工作区的名称/描述 */
+const importName = ref('')
+const importDescription = ref('')
 
 const onlineRuntimes = computed(() =>
   runtimes.value.filter((r) => (r.status || '').toLowerCase() === 'online'),
@@ -69,6 +72,22 @@ const allFilteredSelected = computed(() => {
 })
 
 const selectedCount = computed(() => selectedRuntimeSkillIds.value.length)
+
+const soleSelectedSkill = computed(() => {
+  if (selectedRuntimeSkillIds.value.length !== 1) return null
+  const id = selectedRuntimeSkillIds.value[0]
+  return runtimeSkills.value.find((s) => s.id === id) || null
+})
+
+watch(soleSelectedSkill, (sk) => {
+  if (sk) {
+    importName.value = sk.name
+    importDescription.value = sk.description || ''
+  } else {
+    importName.value = ''
+    importDescription.value = ''
+  }
+})
 
 async function load() {
   loading.value = true
@@ -100,6 +119,8 @@ function openCreate() {
   runtimeSkills.value = []
   selectedRuntimeSkillIds.value = []
   runtimeQuery.value = ''
+  importName.value = ''
+  importDescription.value = ''
   showCreate.value = true
 }
 
@@ -280,32 +301,61 @@ async function promoteRuntimeSkills() {
     runtimeErr.value = '请至少选择一个 skill'
     return
   }
+  const sole = soleSelectedSkill.value
+  if (sole) {
+    const name = importName.value.trim()
+    if (!name) {
+      runtimeErr.value = '请填写工作区里的 skill 名称'
+      return
+    }
+  }
   busy.value = true
   runtimeErr.value = ''
   try {
     const byId = new Map(runtimeSkills.value.map((s) => [s.id, s]))
+    const soleId = sole?.id
     for (const skillId of selectedRuntimeSkillIds.value) {
       const sk = byId.get(skillId)
       if (!sk) continue
+      const name =
+        soleId && skillId === soleId ? importName.value.trim() || sk.name : sk.name
+      const description =
+        soleId && skillId === soleId
+          ? importDescription.value.trim() || undefined
+          : sk.description || undefined
       if (sk.source === 'local' && sk.content) {
         await apiFetch('/api/skills', {
           method: 'POST',
           body: JSON.stringify({
-            name: sk.name,
-            description: sk.description || undefined,
+            name,
+            description,
             content: sk.content,
             sourceType: 'runtime',
             sourceRef: sk.sourcePath,
           }),
         })
       } else if (selectedRuntimeId.value) {
-        await apiFetch('/api/skills/from-runtime', {
-          method: 'POST',
-          body: JSON.stringify({
-            runtimeId: selectedRuntimeId.value,
-            skillId,
-          }),
-        })
+        // Daemon 上报路径无正文时走 from-runtime；单选改名则改为带内容创建不可用时仍用原接口
+        if (soleId && skillId === soleId && sk.content) {
+          await apiFetch('/api/skills', {
+            method: 'POST',
+            body: JSON.stringify({
+              name,
+              description,
+              content: sk.content,
+              sourceType: 'runtime',
+              sourceRef: sk.sourcePath,
+            }),
+          })
+        } else {
+          await apiFetch('/api/skills/from-runtime', {
+            method: 'POST',
+            body: JSON.stringify({
+              runtimeId: selectedRuntimeId.value,
+              skillId,
+            }),
+          })
+        }
       }
     }
     showCreate.value = false
@@ -315,6 +365,15 @@ async function promoteRuntimeSkills() {
   } finally {
     busy.value = false
   }
+}
+
+function runtimeFooterHint() {
+  if (!selectedCount.value) return '请选择一个 skill 继续。'
+  if (soleSelectedSkill.value) {
+    const name = importName.value.trim() || soleSelectedSkill.value.name
+    return `准备导入 ${name} 到工作区。`
+  }
+  return `已选择 ${selectedCount.value} 个 skill`
 }
 
 function setMenuOpen(id: string, open: boolean) {
@@ -627,18 +686,23 @@ onMounted(load)
                 </label>
               </li>
             </ul>
+
+            <div v-if="soleSelectedSkill" class="rt-import-meta">
+              <label>
+                工作区里的 skill 名称
+                <input v-model="importName" type="text" autocomplete="off" />
+              </label>
+              <label>
+                描述
+                <textarea v-model="importDescription" rows="4" />
+              </label>
+            </div>
           </template>
 
           <p v-if="runtimeErr" class="error">{{ runtimeErr }}</p>
 
           <div class="rt-footer">
-            <span class="rt-footer-hint">
-              {{
-                selectedCount
-                  ? `已选择 ${selectedCount} 个 skill`
-                  : '请选择一个 skill 继续。'
-              }}
-            </span>
+            <span class="rt-footer-hint">{{ runtimeFooterHint() }}</span>
             <button
               type="button"
               class="btn-add btn-import"
@@ -1108,6 +1172,37 @@ tr:last-child td { border-bottom: none; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.rt-import-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+.rt-import-meta label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+.rt-import-meta input,
+.rt-import-meta textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  background: #fff;
+  resize: vertical;
 }
 .rt-footer {
   display: flex;
