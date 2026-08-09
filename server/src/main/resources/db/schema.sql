@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS rb_skill (
     id           BIGINT PRIMARY KEY,
     workspace_id BIGINT NOT NULL,
     name         VARCHAR(128) NOT NULL,
-    description  VARCHAR(2048) NULL COMMENT '简介（可从 frontmatter 解析）',
+    description  TEXT NULL COMMENT '简介（可从 frontmatter 解析）',
     content      MEDIUMTEXT NOT NULL,
     source_type  VARCHAR(32) NOT NULL DEFAULT 'manual' COMMENT 'manual|url|runtime',
     source_ref   VARCHAR(512) NULL COMMENT '来源 URL 或运行时路径',
