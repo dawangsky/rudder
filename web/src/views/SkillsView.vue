@@ -1,38 +1,58 @@
 <script setup lang="ts">
 /**
- * Skills：工作区共享指令；支持手动创建 / URL 导入 / 从运行时复制。
+ * Skills：列表（搜索/筛选/多选批量）+ 新建（手动 / URL / 运行时）+ 导入结果。
+ * Desktop 保留本机 scanLocalSkills 与运行时导入能力。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
-import MoreMenu from '@/components/MoreMenu.vue'
-import ActionIcon from '@/components/ActionIcon.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
+import AgentAvatar from '@/components/AgentAvatar.vue'
 import { getHostBridge, isDesktopHost } from '@/lib/hostBridge'
 import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import {
+  creatorInitials,
   defaultSkillMarkdown,
+  emptyImportResult,
   formatSkillDisplayPath,
   formatSkillTime,
   skillOriginFromPath,
   sourceLabel,
+  type ImportResultAction,
+  type ImportResultSummary,
   type RuntimeSkill,
   type Skill,
   type SkillUrlPreview,
 } from '@/lib/skills'
 import { displayName, iconProvider, providerLabel, type Runtime } from '@/lib/runtimes'
+import type { Agent } from '@/lib/agents'
 
-type Step = 'picker' | 'manual' | 'url' | 'runtime'
+type Step = 'picker' | 'manual' | 'url' | 'runtime' | 'result'
+type SourceFilter = 'all' | 'manual' | 'url' | 'runtime'
+type SortDir = 'desc' | 'asc'
+
+const router = useRouter()
 
 const items = ref<Skill[]>([])
 const runtimes = ref<Runtime[]>([])
+const agents = ref<Agent[]>([])
 const loading = ref(false)
 const busy = ref(false)
 const err = ref('')
+
+const listQuery = ref('')
+const sourceFilter = ref<SourceFilter>('all')
+const sortDir = ref<SortDir>('desc')
+const selectedIds = ref<string[]>([])
+
 const showCreate = ref(false)
 const step = ref<Step>('picker')
-const menuOpenId = ref('')
-const pendingDelete = ref<Skill | null>(null)
+const importResult = ref<ImportResultSummary>(emptyImportResult())
+
+const pendingDeleteIds = ref<string[]>([])
+const showBind = ref(false)
+const bindSelected = ref<string[]>([])
 
 const manualName = ref('')
 const manualContent = ref(defaultSkillMarkdown())
@@ -75,6 +95,33 @@ const selectedRuntime = computed(() =>
   onlineRuntimes.value.find((r) => r.id === selectedRuntimeId.value) || null,
 )
 
+const filteredItems = computed(() => {
+  let list = items.value
+  const q = listQuery.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter((s) => {
+      const hay = `${s.name} ${s.description || ''} ${s.createdBy || ''}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }
+  if (sourceFilter.value !== 'all') {
+    list = list.filter((s) => (s.sourceType || 'manual') === sourceFilter.value)
+  }
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  return [...list].sort((a, b) => {
+    const ta = Date.parse((a.updatedAt || a.createdAt || '').replace(' ', 'T')) || 0
+    const tb = Date.parse((b.updatedAt || b.createdAt || '').replace(' ', 'T')) || 0
+    return (ta - tb) * dir
+  })
+})
+
+const selectedCount = computed(() => selectedIds.value.length)
+
+const allFilteredSelected = computed(() => {
+  const list = filteredItems.value
+  return list.length > 0 && list.every((s) => selectedIds.value.includes(s.id))
+})
+
 const filteredRuntimeSkills = computed(() => {
   const q = runtimeQuery.value.trim().toLowerCase()
   if (!q) return runtimeSkills.value
@@ -84,17 +131,26 @@ const filteredRuntimeSkills = computed(() => {
   })
 })
 
-const allFilteredSelected = computed(() => {
+const allRuntimeFilteredSelected = computed(() => {
   const list = filteredRuntimeSkills.value
   return list.length > 0 && list.every((s) => selectedRuntimeSkillIds.value.includes(s.id))
 })
 
-const selectedCount = computed(() => selectedRuntimeSkillIds.value.length)
+const runtimeSelectedCount = computed(() => selectedRuntimeSkillIds.value.length)
 
 const soleSelectedSkill = computed(() => {
   if (selectedRuntimeSkillIds.value.length !== 1) return null
   const id = selectedRuntimeSkillIds.value[0]
   return runtimeSkills.value.find((s) => s.id === id) || null
+})
+
+const pendingDeleteTitle = computed(() => {
+  const ids = pendingDeleteIds.value
+  if (ids.length === 1) {
+    const s = items.value.find((x) => x.id === ids[0])
+    return s ? `删除 skill「${s.name}」？` : '删除 skill？'
+  }
+  return `删除已选的 ${ids.length} 个 skill？`
 })
 
 watch(soleSelectedSkill, async (sk) => {
@@ -110,6 +166,51 @@ watch(soleSelectedSkill, async (sk) => {
     importDescription.value = ''
   }
 })
+
+watch(filteredItems, (list) => {
+  const alive = new Set(list.map((s) => s.id))
+  selectedIds.value = selectedIds.value.filter((id) => alive.has(id))
+})
+
+function usedByText(s: Skill): string {
+  const agentsList = s.agents || []
+  const count = s.agentCount ?? agentsList.length
+  if (!count) return '— 未使用'
+  if (agentsList.length === 1) return agentsList[0].name
+  if (agentsList.length > 1) {
+    const names = agentsList.slice(0, 2).map((a) => a.name).join('、')
+    return agentsList.length > 2 ? `${names} 等 ${count} 个` : names
+  }
+  return `${count} 个智能体`
+}
+
+function goDetail(skillId: string) {
+  router.push({ name: 'skill-detail', params: { skillId } })
+}
+
+function toggleSelect(id: string) {
+  const set = new Set(selectedIds.value)
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
+  selectedIds.value = [...set]
+}
+
+function toggleSelectAllFiltered() {
+  const ids = filteredItems.value.map((s) => s.id)
+  if (!ids.length) return
+  if (allFilteredSelected.value) {
+    const drop = new Set(ids)
+    selectedIds.value = selectedIds.value.filter((id) => !drop.has(id))
+  } else {
+    const set = new Set(selectedIds.value)
+    for (const id of ids) set.add(id)
+    selectedIds.value = [...set]
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = []
+}
 
 async function load() {
   loading.value = true
@@ -128,11 +229,21 @@ async function load() {
   }
 }
 
+async function loadAgents() {
+  try {
+    const list = await apiFetch<Agent[]>('/api/agents')
+    agents.value = list.filter((x) => (x.status || '').toLowerCase() !== 'archived')
+  } catch {
+    agents.value = []
+  }
+}
+
 function openCreate() {
   step.value = 'picker'
   err.value = ''
   urlErr.value = ''
   runtimeErr.value = ''
+  importResult.value = emptyImportResult()
   manualName.value = ''
   manualContent.value = defaultSkillMarkdown()
   urlInput.value = ''
@@ -152,6 +263,13 @@ function closeCreate() {
   if (busy.value) return
   runtimeMenuOpen.value = false
   showCreate.value = false
+}
+
+async function finishImportResult() {
+  showCreate.value = false
+  step.value = 'picker'
+  importResult.value = emptyImportResult()
+  await load()
 }
 
 function choose(s: Step) {
@@ -228,6 +346,14 @@ async function previewUrl() {
   }
 }
 
+function applySkillAction(summary: ImportResultSummary, name: string, action?: string, message?: string) {
+  const a = (action === 'updated' ? 'updated' : action === 'failed' ? 'failed' : 'created') as ImportResultAction
+  if (a === 'created') summary.created += 1
+  else if (a === 'updated') summary.updated += 1
+  else summary.failed += 1
+  summary.items.push({ name, action: a, message })
+}
+
 async function importUrl() {
   const url = urlInput.value.trim()
   if (!url) {
@@ -237,12 +363,14 @@ async function importUrl() {
   busy.value = true
   urlErr.value = ''
   try {
-    await apiFetch('/api/skills/import-url', {
+    const res = await apiFetch<Skill>('/api/skills/import-url', {
       method: 'POST',
       body: JSON.stringify({ url }),
     })
-    showCreate.value = false
-    await load()
+    const summary = emptyImportResult()
+    applySkillAction(summary, res.name || urlPreview.value?.name || 'skill', res.action)
+    importResult.value = summary
+    step.value = 'result'
   } catch (e) {
     urlErr.value = e instanceof Error ? e.message : '导入失败'
   } finally {
@@ -352,10 +480,10 @@ function toggleRuntimeSkill(id: string) {
   selectedRuntimeSkillIds.value = [...set]
 }
 
-function toggleSelectAllFiltered() {
+function toggleSelectAllRuntimeFiltered() {
   const ids = filteredRuntimeSkills.value.map((s) => s.id)
   if (!ids.length) return
-  if (allFilteredSelected.value) {
+  if (allRuntimeFilteredSelected.value) {
     const drop = new Set(ids)
     selectedRuntimeSkillIds.value = selectedRuntimeSkillIds.value.filter((id) => !drop.has(id))
   } else {
@@ -380,6 +508,7 @@ async function promoteRuntimeSkills() {
   }
   busy.value = true
   runtimeErr.value = ''
+  const summary = emptyImportResult()
   try {
     const byId = new Map(runtimeSkills.value.map((s) => [s.id, s]))
     const soleId = sole?.id
@@ -392,21 +521,10 @@ async function promoteRuntimeSkills() {
         soleId && skillId === soleId
           ? importDescription.value.trim() || undefined
           : sk.description || undefined
-      if (sk.source === 'local' && sk.content) {
-        await apiFetch('/api/skills', {
-          method: 'POST',
-          body: JSON.stringify({
-            name,
-            description,
-            content: sk.content,
-            sourceType: 'runtime',
-            sourceRef: sk.sourcePath,
-          }),
-        })
-      } else if (selectedRuntimeId.value) {
-        // Daemon 上报路径无正文时走 from-runtime；单选改名则改为带内容创建不可用时仍用原接口
-        if (soleId && skillId === soleId && sk.content) {
-          await apiFetch('/api/skills', {
+      try {
+        let res: Skill | null = null
+        if (sk.source === 'local' && sk.content) {
+          res = await apiFetch<Skill>('/api/skills', {
             method: 'POST',
             body: JSON.stringify({
               name,
@@ -416,53 +534,119 @@ async function promoteRuntimeSkills() {
               sourceRef: sk.sourcePath,
             }),
           })
+        } else if (selectedRuntimeId.value) {
+          // Daemon 上报路径无正文时走 from-runtime；单选改名则改为带内容创建不可用时仍用原接口
+          if (soleId && skillId === soleId && sk.content) {
+            res = await apiFetch<Skill>('/api/skills', {
+              method: 'POST',
+              body: JSON.stringify({
+                name,
+                description,
+                content: sk.content,
+                sourceType: 'runtime',
+                sourceRef: sk.sourcePath,
+              }),
+            })
+          } else {
+            res = await apiFetch<Skill>('/api/skills/from-runtime', {
+              method: 'POST',
+              body: JSON.stringify({
+                runtimeId: selectedRuntimeId.value,
+                skillId,
+              }),
+            })
+          }
         } else {
-          await apiFetch('/api/skills/from-runtime', {
-            method: 'POST',
-            body: JSON.stringify({
-              runtimeId: selectedRuntimeId.value,
-              skillId,
-            }),
-          })
+          throw new Error('无法导入：缺少运行时或本地内容')
         }
+        applySkillAction(summary, res?.name || name, res?.action)
+      } catch (e) {
+        applySkillAction(
+          summary,
+          name,
+          'failed',
+          e instanceof Error ? e.message : '导入失败',
+        )
       }
     }
-    showCreate.value = false
-    await load()
-  } catch (e) {
-    runtimeErr.value = e instanceof Error ? e.message : '导入失败'
+    importResult.value = summary
+    step.value = 'result'
   } finally {
     busy.value = false
   }
 }
 
 function runtimeFooterHint() {
-  if (!selectedCount.value) return '请选择一个 skill 继续。'
+  if (!runtimeSelectedCount.value) return '请选择一个 skill 继续。'
   if (soleSelectedSkill.value) {
     const name = importName.value.trim() || soleSelectedSkill.value.name
     return `准备导入 ${name} 到工作区。`
   }
-  return `已选择 ${selectedCount.value} 个 skill`
+  return `已选择 ${runtimeSelectedCount.value} 个 skill`
 }
 
-function setMenuOpen(id: string, open: boolean) {
-  menuOpenId.value = open ? id : ''
-}
-
-function askDelete(s: Skill) {
-  pendingDelete.value = s
+function askDeleteSelected() {
+  if (!selectedIds.value.length) return
+  pendingDeleteIds.value = [...selectedIds.value]
 }
 
 async function confirmDelete() {
-  if (!pendingDelete.value) return
+  const ids = pendingDeleteIds.value
+  if (!ids.length) return
   busy.value = true
   err.value = ''
   try {
-    await apiFetch(`/api/skills/${pendingDelete.value.id}`, { method: 'DELETE' })
-    pendingDelete.value = null
+    try {
+      await apiFetch('/api/skills/delete-batch', {
+        method: 'POST',
+        body: JSON.stringify({ skillIds: ids }),
+      })
+    } catch {
+      for (const id of ids) {
+        await apiFetch(`/api/skills/${id}`, { method: 'DELETE' })
+      }
+    }
+    pendingDeleteIds.value = []
+    selectedIds.value = []
     await load()
   } catch (e) {
     err.value = e instanceof Error ? e.message : '删除失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function openBind() {
+  if (!selectedIds.value.length) return
+  bindSelected.value = []
+  showBind.value = true
+  await loadAgents()
+}
+
+function toggleBind(id: string) {
+  const set = new Set(bindSelected.value)
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
+  bindSelected.value = [...set]
+}
+
+async function confirmBind() {
+  if (!selectedIds.value.length || !bindSelected.value.length) return
+  busy.value = true
+  err.value = ''
+  try {
+    await apiFetch('/api/skills/bind-agents', {
+      method: 'POST',
+      body: JSON.stringify({
+        skillIds: selectedIds.value,
+        agentIds: bindSelected.value,
+      }),
+    })
+    showBind.value = false
+    clearSelection()
+    await load()
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '添加失败'
   } finally {
     busy.value = false
   }
@@ -475,13 +659,35 @@ function runtimeOptionLabel(r: Runtime) {
 }
 
 function skillTag(s: RuntimeSkill) {
-  // 与目标 UI 一致：优先展示所选运行时短名；否则回退到来源目录标签
   if (selectedRuntime.value) return displayName(selectedRuntime.value).toLowerCase()
   return s.origin || skillOriginFromPath(s.sourcePath)
 }
 
 function skillPath(s: RuntimeSkill) {
   return s.displayPath || formatSkillDisplayPath(s.sourcePath)
+}
+
+function actionLabel(action: ImportResultAction) {
+  switch (action) {
+    case 'created':
+      return '新建'
+    case 'updated':
+      return '更新'
+    case 'conflict':
+      return '冲突'
+    case 'skipped':
+      return '跳过'
+    case 'failed':
+      return '失败'
+    default:
+      return action
+  }
+}
+
+function modalTitle() {
+  if (step.value === 'runtime') return '从运行时复制'
+  if (step.value === 'result') return '导入完成'
+  return '新建 skill'
 }
 
 onMounted(() => {
@@ -521,7 +727,33 @@ onUnmounted(() => {
       <button type="button" class="btn-add" @click="openCreate">+ 新建 skill</button>
     </header>
 
-    <p v-if="err && !showCreate" class="error">{{ err }}</p>
+    <p v-if="err && !showCreate && !showBind" class="error">{{ err }}</p>
+
+    <div class="toolbar">
+      <label class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.6" />
+          <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+        <input v-model="listQuery" type="search" placeholder="搜索 skill..." />
+      </label>
+      <label class="filter">
+        <span class="filter-label">来源</span>
+        <select v-model="sourceFilter">
+          <option value="all">全部</option>
+          <option value="manual">手动</option>
+          <option value="url">URL</option>
+          <option value="runtime">运行时</option>
+        </select>
+      </label>
+      <label class="filter">
+        <span class="filter-label">更新时间</span>
+        <select v-model="sortDir">
+          <option value="desc">最新优先</option>
+          <option value="asc">最早优先</option>
+        </select>
+      </label>
+    </div>
 
     <div v-if="loading" class="empty-state">
       <p class="muted">加载中…</p>
@@ -549,51 +781,71 @@ onUnmounted(() => {
       <table>
         <thead>
           <tr>
-            <th>Skill</th>
-            <th>来源</th>
-            <th>更新</th>
-            <th class="col-actions"></th>
+            <th class="col-check">
+              <input
+                type="checkbox"
+                :checked="allFilteredSelected"
+                :disabled="!filteredItems.length"
+                aria-label="全选"
+                @change="toggleSelectAllFiltered"
+              />
+            </th>
+            <th>名称</th>
+            <th>被谁使用</th>
+            <th>添加者</th>
+            <th>更新时间</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="s in items" :key="s.id">
-            <td>
-              <div class="skill-cell">
-                <strong>{{ s.name }}</strong>
-                <span class="desc">{{ s.description || '暂无描述' }}</span>
-              </div>
+          <tr v-if="!filteredItems.length">
+            <td colspan="5" class="empty-row muted">没有匹配的 skill</td>
+          </tr>
+          <tr v-for="s in filteredItems" :key="s.id">
+            <td class="col-check" @click.stop>
+              <input
+                type="checkbox"
+                :checked="selectedIds.includes(s.id)"
+                :aria-label="`选择 ${s.name}`"
+                @change="toggleSelect(s.id)"
+              />
             </td>
             <td>
-              <span class="badge">{{ sourceLabel(s.sourceType) }}</span>
+              <button type="button" class="name-link" @click="goDetail(s.id)">
+                {{ s.name }}
+              </button>
+              <span v-if="s.sourceType" class="src-hint">{{ sourceLabel(s.sourceType) }}</span>
+            </td>
+            <td :class="{ muted: !(s.agentCount || s.agents?.length) }">
+              {{ usedByText(s) }}
+            </td>
+            <td>
+              <span class="creator">
+                <span class="creator-av" aria-hidden="true">{{ creatorInitials(s.createdBy) }}</span>
+                <span>{{ s.createdBy || '未知' }}</span>
+              </span>
             </td>
             <td class="muted">{{ formatSkillTime(s.updatedAt || s.createdAt) }}</td>
-            <td class="col-actions" @click.stop>
-              <MoreMenu
-                :open="menuOpenId === s.id"
-                @update:open="(v) => setMenuOpen(s.id, v)"
-              >
-                <template #default="{ close }">
-                  <button
-                    type="button"
-                    class="danger"
-                    :disabled="busy"
-                    @click="close(); askDelete(s)"
-                  >
-                    <ActionIcon name="delete" />
-                    删除
-                  </button>
-                </template>
-              </MoreMenu>
-            </td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <div v-if="selectedCount > 0" class="bulk-bar" role="toolbar" aria-label="批量操作">
+      <span class="bulk-count">已选 {{ selectedCount }} 项</span>
+      <button type="button" class="bulk-x" aria-label="清除选择" @click="clearSelection">×</button>
+      <button type="button" class="btn-add bulk-btn" :disabled="busy" @click="openBind">
+        + 添加到智能体
+      </button>
+      <button type="button" class="btn-danger bulk-btn" :disabled="busy" @click="askDeleteSelected">
+        删除
+      </button>
+    </div>
+
+    <!-- 新建 / 导入 -->
     <div v-if="showCreate" class="modal-backdrop" @click.self="closeCreate">
       <div
         class="modal"
-        :class="{ 'modal-wide': step === 'runtime' }"
+        :class="{ 'modal-wide': step === 'runtime' || step === 'result' }"
         role="dialog"
         aria-modal="true"
         aria-labelledby="skill-create-title"
@@ -601,7 +853,7 @@ onUnmounted(() => {
         <div class="modal-head">
           <div class="modal-head-main">
             <button
-              v-if="step !== 'picker'"
+              v-if="step !== 'picker' && step !== 'result'"
               type="button"
               class="back-icon"
               aria-label="返回"
@@ -610,13 +862,12 @@ onUnmounted(() => {
               ←
             </button>
             <div>
-              <h3 id="skill-create-title">
-                {{ step === 'runtime' ? '从运行时复制' : '新建 skill' }}
-              </h3>
+              <h3 id="skill-create-title">{{ modalTitle() }}</h3>
               <p v-if="step === 'picker'" class="modal-lead">选择一种方式把 skill 添加到工作区。</p>
               <p v-else-if="step === 'manual'" class="modal-lead">从空白 SKILL.md 开始，自己写指令。</p>
               <p v-else-if="step === 'url'" class="modal-lead">从 ClawHub 或 Skills.sh 拉取已发布的 skill。</p>
-              <p v-else class="modal-lead">扫描本地运行时，把它磁盘上的 skill 提升到工作区。</p>
+              <p v-else-if="step === 'runtime'" class="modal-lead">扫描本地运行时，把它磁盘上的 skill 提升到工作区。</p>
+              <p v-else class="modal-lead">本次导入结果如下。</p>
             </div>
           </div>
           <button type="button" class="modal-x" aria-label="关闭" @click="closeCreate">×</button>
@@ -690,7 +941,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-else class="runtime-panel">
+        <div v-else-if="step === 'runtime'" class="runtime-panel">
           <div class="rt-label">
             运行时
             <div class="rt-combo" :class="{ open: runtimeMenuOpen }">
@@ -823,8 +1074,8 @@ onUnmounted(() => {
             <label class="rt-select-all">
               <input
                 type="checkbox"
-                :checked="allFilteredSelected"
-                @change="toggleSelectAllFiltered"
+                :checked="allRuntimeFilteredSelected"
+                @change="toggleSelectAllRuntimeFiltered"
               />
               全选 ({{ filteredRuntimeSkills.length }})
             </label>
@@ -882,7 +1133,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="btn-add btn-import"
-              :disabled="busy || !selectedCount"
+              :disabled="busy || !runtimeSelectedCount"
               @click="promoteRuntimeSkills"
             >
               <span aria-hidden="true">⇩</span>
@@ -890,18 +1141,87 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+
+        <div v-else class="result-panel">
+          <div class="result-stats">
+            <div class="stat created">
+              <strong>{{ importResult.created }}</strong>
+              <span>新建</span>
+            </div>
+            <div class="stat updated">
+              <strong>{{ importResult.updated }}</strong>
+              <span>更新</span>
+            </div>
+            <div class="stat conflict">
+              <strong>{{ importResult.conflict }}</strong>
+              <span>冲突</span>
+            </div>
+            <div class="stat skipped">
+              <strong>{{ importResult.skipped }}</strong>
+              <span>跳过</span>
+            </div>
+            <div class="stat failed">
+              <strong>{{ importResult.failed }}</strong>
+              <span>失败</span>
+            </div>
+          </div>
+          <ul class="result-items">
+            <li v-for="(it, idx) in importResult.items" :key="idx">
+              <span class="result-name">{{ it.name }}</span>
+              <span class="result-action" :class="it.action">{{ actionLabel(it.action) }}</span>
+              <span v-if="it.message" class="result-msg">{{ it.message }}</span>
+            </li>
+          </ul>
+          <div class="modal-actions">
+            <button type="button" class="btn-add" @click="finishImportResult">完成</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量绑定智能体 -->
+    <div v-if="showBind" class="modal-backdrop" @click.self="showBind = false">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h3>添加到智能体</h3>
+        <p class="hint">将已选的 {{ selectedCount }} 个 skill 挂载到智能体。</p>
+        <ul class="bind-list">
+          <li v-for="a in agents" :key="a.id">
+            <label>
+              <input
+                type="checkbox"
+                :checked="bindSelected.includes(a.id)"
+                @change="toggleBind(a.id)"
+              />
+              <AgentAvatar :src="a.avatar" :provider="a.provider" :size="24" :rounded="8" />
+              <span>{{ a.name }}</span>
+            </label>
+          </li>
+        </ul>
+        <p v-if="!agents.length" class="muted">暂无可用智能体</p>
+        <p v-if="err && showBind" class="error">{{ err }}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-ghost" :disabled="busy" @click="showBind = false">取消</button>
+          <button
+            type="button"
+            class="btn-add"
+            :disabled="busy || !bindSelected.length"
+            @click="confirmBind"
+          >
+            {{ busy ? '添加中…' : '添加' }}
+          </button>
+        </div>
       </div>
     </div>
 
     <ConfirmDialog
-      v-if="pendingDelete"
+      v-if="pendingDeleteIds.length"
       :open="true"
-      :title="`删除 skill「${pendingDelete.name}」？`"
-      description="将从工作区移除该 skill，并解除智能体上的挂载。此操作不可恢复。"
+      :title="pendingDeleteTitle"
+      description="将从工作区移除所选 skill，并解除智能体上的挂载。此操作不可恢复。"
       confirm-label="删除"
       tone="danger"
       :busy="busy"
-      @cancel="pendingDelete = null"
+      @cancel="pendingDeleteIds = []"
       @confirm="confirmDelete"
     />
   </section>
@@ -909,17 +1229,18 @@ onUnmounted(() => {
 
 <style scoped>
 .page {
-  max-width: 960px;
+  max-width: 1100px;
   min-height: calc(100vh - 96px);
   display: flex;
   flex-direction: column;
+  padding-bottom: 72px;
 }
 .head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   flex-shrink: 0;
 }
 h2 {
@@ -938,6 +1259,52 @@ h2 {
 .lead { margin: 8px 0 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .more { color: #2563eb; text-decoration: none; }
 .more:hover { text-decoration: underline; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--muted);
+  min-width: 200px;
+}
+.search input {
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 13px;
+  width: 160px;
+  background: transparent;
+  color: var(--text);
+}
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.filter-label { white-space: nowrap; }
+.filter select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+}
+
 .btn-add {
   border: none;
   background: #1c2333;
@@ -959,6 +1326,18 @@ h2 {
   font-size: 13px;
   cursor: pointer;
 }
+.btn-danger {
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .empty-state {
   flex: 1;
   display: flex;
@@ -968,7 +1347,6 @@ h2 {
   text-align: center;
   gap: 10px;
   padding: 8vh 20px 22vh;
-  margin-top: 0;
 }
 .empty-icon {
   width: 56px;
@@ -993,6 +1371,7 @@ h2 {
   color: var(--muted);
   line-height: 1.55;
 }
+
 .table-wrap {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1010,31 +1389,85 @@ th {
   font-size: 12px;
   color: var(--muted);
   font-weight: 600;
+  white-space: nowrap;
 }
 tr:last-child td { border-bottom: none; }
-.skill-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.skill-cell strong { font-weight: 650; }
-.desc {
-  color: var(--muted);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 420px;
+.col-check { width: 40px; }
+.empty-row { text-align: center; padding: 28px 14px; }
+.name-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
 }
-.badge {
-  display: inline-flex;
+.name-link:hover { color: #2563eb; text-decoration: underline; }
+.src-hint {
+  display: block;
+  margin-top: 2px;
   font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #4b5563;
+  color: var(--muted);
+  font-weight: 500;
 }
-.col-actions { width: 48px; text-align: right; }
+.creator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.creator-av {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 .muted { color: var(--muted); }
 .error { color: var(--danger); margin: 0 0 10px; font-size: 13px; }
 .hint { font-size: 13px; color: var(--muted); margin: 0 0 8px; line-height: 1.45; }
+
+.bulk-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+}
+.bulk-count {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+}
+.bulk-x {
+  border: none;
+  background: #f3f4f6;
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.bulk-x:hover { color: var(--text); background: #e5e7eb; }
+.bulk-btn { padding: 8px 12px; }
 
 .modal-backdrop {
   position: fixed;
@@ -1062,7 +1495,8 @@ tr:last-child td { border-bottom: none; }
   flex-direction: column;
   overflow: hidden;
 }
-.modal-wide .runtime-panel {
+.modal-wide .runtime-panel,
+.modal-wide .result-panel {
   flex: 1;
   min-height: 0;
 }
@@ -1080,7 +1514,8 @@ tr:last-child td { border-bottom: none; }
   gap: 8px;
   min-width: 0;
 }
-.modal-head h3 { margin: 0; font-size: 18px; }
+.modal-head h3,
+.modal > h3 { margin: 0; font-size: 18px; }
 .modal-lead { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
 .back-icon {
   border: none;
@@ -1146,8 +1581,6 @@ tr:last-child td { border-bottom: none; }
 }
 .form input,
 .form textarea,
-.form select,
-.rt-label select,
 .rt-search input {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1204,9 +1637,7 @@ tr:last-child td { border-bottom: none; }
   margin-bottom: 10px;
   flex-shrink: 0;
 }
-.rt-combo {
-  position: relative;
-}
+.rt-combo { position: relative; }
 .rt-combo-trigger {
   width: 100%;
   display: flex;
@@ -1281,9 +1712,7 @@ tr:last-child td { border-bottom: none; }
 .rt-combo-option.active {
   background: #f3f4f6;
 }
-.rt-combo-option.active {
-  font-weight: 600;
-}
+.rt-combo-option.active { font-weight: 600; }
 .rt-card {
   display: flex;
   align-items: center;
@@ -1405,9 +1834,7 @@ tr:last-child td { border-bottom: none; }
 }
 .rt-skills > li { border-bottom: 1px solid var(--border); }
 .rt-skills > li:last-child { border-bottom: none; }
-.rt-skills > li.expanded {
-  background: #f8fafc;
-}
+.rt-skills > li.expanded { background: #f8fafc; }
 .rt-skill {
   display: flex;
   align-items: flex-start;
@@ -1535,4 +1962,101 @@ tr:last-child td { border-bottom: none; }
   align-items: center;
   gap: 6px;
 }
+
+.result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: hidden;
+}
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  flex-shrink: 0;
+}
+.stat {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+  background: #fafafa;
+}
+.stat strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.stat span {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.stat.created strong { color: #15803d; }
+.stat.updated strong { color: #2563eb; }
+.stat.conflict strong { color: #b45309; }
+.stat.skipped strong { color: #6b7280; }
+.stat.failed strong { color: var(--danger); }
+.result-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+  flex: 1;
+  min-height: 120px;
+  max-height: 320px;
+}
+.result-items li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.result-items li:last-child { border-bottom: none; }
+.result-name { font-weight: 650; }
+.result-action {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  align-self: start;
+}
+.result-action.created { background: #dcfce7; color: #166534; }
+.result-action.updated { background: #dbeafe; color: #1d4ed8; }
+.result-action.failed { background: #fee2e2; color: #b91c1c; }
+.result-msg {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bind-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.bind-list li { border-bottom: 1px solid var(--border); }
+.bind-list li:last-child { border-bottom: none; }
+.bind-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.bind-list label:hover { background: #f9fafb; }
 </style>
