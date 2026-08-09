@@ -7,6 +7,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import MoreMenu from '@/components/MoreMenu.vue'
+import ActionIcon from '@/components/ActionIcon.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import { getHostBridge, isDesktopHost } from '@/lib/hostBridge'
@@ -45,6 +47,7 @@ const listQuery = ref('')
 const sourceFilter = ref<SourceFilter>('all')
 const sortDir = ref<SortDir>('desc')
 const selectedIds = ref<string[]>([])
+const menuOpenId = ref('')
 
 const showCreate = ref(false)
 const step = ref<Step>('picker')
@@ -585,6 +588,21 @@ function runtimeFooterHint() {
   return `已选择 ${runtimeSelectedCount.value} 个 skill`
 }
 
+function setMenuOpen(id: string, open: boolean) {
+  menuOpenId.value = open ? id : menuOpenId.value === id ? '' : menuOpenId.value
+}
+
+function askBindOne(s: Skill) {
+  menuOpenId.value = ''
+  selectedIds.value = [s.id]
+  void openBind()
+}
+
+function askDeleteOne(s: Skill) {
+  menuOpenId.value = ''
+  pendingDeleteIds.value = [s.id]
+}
+
 function askDeleteSelected() {
   if (!selectedIds.value.length) return
   pendingDeleteIds.value = [...selectedIds.value]
@@ -794,16 +812,18 @@ onUnmounted(() => {
             <th>被谁使用</th>
             <th>添加者</th>
             <th>更新时间</th>
+            <th class="col-actions"></th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="!filteredItems.length">
-            <td colspan="5" class="empty-row muted">没有匹配的 skill</td>
+            <td colspan="6" class="empty-row muted">没有匹配的 skill</td>
           </tr>
           <tr
             v-for="s in filteredItems"
             :key="s.id"
             class="row-click"
+            :class="{ 'menu-open': menuOpenId === s.id }"
             @click="goDetail(s.id)"
           >
             <td class="col-check" @click.stop>
@@ -828,6 +848,28 @@ onUnmounted(() => {
               </span>
             </td>
             <td class="muted">{{ formatSkillTime(s.updatedAt || s.createdAt) }}</td>
+            <td class="col-actions" @click.stop>
+              <MoreMenu
+                :open="menuOpenId === s.id"
+                @update:open="(v) => setMenuOpen(s.id, v)"
+              >
+                <template #default="{ close }">
+                  <button type="button" :disabled="busy" @click="close(); askBindOne(s)">
+                    <ActionIcon name="assign" />
+                    添加到智能体
+                  </button>
+                  <button
+                    type="button"
+                    class="danger"
+                    :disabled="busy"
+                    @click="close(); askDeleteOne(s)"
+                  >
+                    <ActionIcon name="delete" />
+                    删除
+                  </button>
+                </template>
+              </MoreMenu>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1396,8 +1438,24 @@ th {
 }
 tr:last-child td { border-bottom: none; }
 .row-click { cursor: pointer; }
-.row-click:hover td { background: #f9fafb; }
+.row-click:hover td,
+.row-click.menu-open td { background: #f9fafb; }
 .col-check { width: 40px; }
+.col-actions {
+  width: 48px;
+  text-align: right;
+  padding-right: 10px;
+}
+.row-click :deep(.more-btn) {
+  opacity: 0;
+  pointer-events: none;
+}
+.row-click:hover :deep(.more-btn),
+.row-click.menu-open :deep(.more-btn),
+.row-click :deep(.more-btn[aria-expanded='true']) {
+  opacity: 1;
+  pointer-events: auto;
+}
 .empty-row { text-align: center; padding: 28px 14px; }
 .name-link {
   font-weight: 700;
