@@ -10,11 +10,19 @@ export type SkillAgentBrief = {
   provider?: string
 }
 
+export type SkillFile = {
+  path: string
+  content: string
+}
+
 export type Skill = {
   id: string
   name: string
   description?: string
   content: string
+  /** 附属文件（不含 SKILL.md） */
+  files?: SkillFile[]
+  fileCount?: number
   sourceType?: SkillSourceType | string
   sourceRef?: string
   createdByUserId?: string | null

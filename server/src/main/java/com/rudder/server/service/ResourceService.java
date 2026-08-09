@@ -393,9 +393,13 @@ public class ResourceService {
                 s.setDescription(parsed.description());
             }
             touched = true;
-        } else if (touched) {
+        } else if (touched && !body.containsKey("files")) {
             s.setContent(SkillMarkdown.syncFrontmatter(s.getContent(), s.getName(),
                     s.getDescription() == null ? "" : s.getDescription()));
+        }
+        if (body.containsKey("files")) {
+            s.setFilesJson(serializeSkillFiles(normalizeSkillFiles(body.get("files"))));
+            touched = true;
         }
         if (!touched) throw new IllegalArgumentException("没有可更新的字段");
         s.setUpdatedAt(LocalDateTime.now());
@@ -609,6 +613,9 @@ public class ResourceService {
         m.put("name", s.getName());
         m.put("description", s.getDescription() == null ? "" : s.getDescription());
         m.put("content", s.getContent());
+        List<Map<String, Object>> files = parseSkillFiles(s.getFilesJson());
+        m.put("files", files);
+        m.put("fileCount", 1 + files.size());
         m.put("sourceType", s.getSourceType() == null ? "manual" : s.getSourceType());
         m.put("sourceRef", s.getSourceRef() == null ? "" : s.getSourceRef());
         m.put("createdByUserId", s.getCreatedByUserId() == null ? null : String.valueOf(s.getCreatedByUserId()));
@@ -650,6 +657,13 @@ public class ResourceService {
             Map<String, Object> m = skillView(s);
             if (!withContent) {
                 m.put("content", "");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> files = (List<Map<String, Object>>) m.get("files");
+                if (files != null) {
+                    for (Map<String, Object> f : files) {
+                        f.put("content", "");
+                    }
+                }
             }
             UserEntity creator = s.getCreatedByUserId() == null ? null : users.get(s.getCreatedByUserId());
             if (creator != null) {
@@ -1111,6 +1125,59 @@ public class ResourceService {
         }
         i.setReadFlag(1);
         inboxMapper.updateById(i);
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper SKILL_JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    private static List<Map<String, Object>> parseSkillFiles(String raw) {
+        if (!StringUtils.hasText(raw)) return new ArrayList<>();
+        try {
+            List<Map<String, Object>> list = SKILL_JSON.readValue(
+                    raw,
+                    SKILL_JSON.getTypeFactory().constructCollectionType(List.class, Map.class));
+            return normalizeSkillFiles(list);
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private static List<Map<String, Object>> normalizeSkillFiles(Object raw) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (!(raw instanceof List<?> list)) return out;
+        Set<String> seen = new HashSet<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m)) continue;
+            String path = str(m.get("path")).replace('\\', '/').trim();
+            if (!StringUtils.hasText(path)) continue;
+            if (path.startsWith("/")) path = path.substring(1);
+            if (path.contains("..")) throw new IllegalArgumentException("非法文件路径: " + path);
+            String lower = path.toLowerCase();
+            if ("skill.md".equals(lower)) {
+                throw new IllegalArgumentException("SKILL.md 请使用主文件编辑，不能作为附属文件");
+            }
+            if (!seen.add(lower)) throw new IllegalArgumentException("重复文件路径: " + path);
+            Object contentObj = m.get("content");
+            String content = contentObj == null ? "" : String.valueOf(contentObj);
+            if (content.length() > 2_000_000) {
+                throw new IllegalArgumentException("附属文件过大: " + path);
+            }
+            Map<String, Object> row = new HashMap<>();
+            row.put("path", path);
+            row.put("content", content);
+            out.add(row);
+            if (out.size() > 100) throw new IllegalArgumentException("附属文件过多");
+        }
+        return out;
+    }
+
+    private static String serializeSkillFiles(List<Map<String, Object>> files) {
+        if (files == null || files.isEmpty()) return null;
+        try {
+            return SKILL_JSON.writeValueAsString(files);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("附属文件序列化失败");
+        }
     }
 
     private static String normalizeModel(Object raw) {

@@ -29,6 +29,10 @@ public class SkillEntity {
     @TableField("content")
     private String content;
 
+    /** 附属文件 JSON：[{path, content}, ...] */
+    @TableField("files_json")
+    private String filesJson;
+
     /** manual | url | runtime */
     @TableField("source_type")
     private String sourceType;

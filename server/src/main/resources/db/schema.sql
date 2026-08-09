@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS rb_skill (
     name         VARCHAR(128) NOT NULL,
     description  TEXT NULL COMMENT '简介（可从 frontmatter 解析；TEXT 不宜做前缀索引）',
     content      MEDIUMTEXT NOT NULL,
+    files_json   MEDIUMTEXT NULL COMMENT '附属文件 JSON [{path,content}]',
     source_type  VARCHAR(32) NOT NULL DEFAULT 'manual' COMMENT 'manual|url|runtime',
     source_ref   VARCHAR(512) NULL COMMENT '来源 URL 或运行时路径',
     created_by_user_id BIGINT NULL COMMENT '创建者用户 id',

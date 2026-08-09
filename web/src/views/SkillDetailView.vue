@@ -15,6 +15,7 @@ import {
   skillOriginFromPath,
   sourceLabel,
   type Skill,
+  type SkillFile,
 } from '@/lib/skills'
 import { displayName, type Runtime } from '@/lib/runtimes'
 import type { Agent } from '@/lib/agents'
@@ -34,13 +35,21 @@ const err = ref('')
 const okMsg = ref('')
 const tab = ref<Tab>('overview')
 const fileMode = ref<FileMode>('preview')
+/** 当前选中：SKILL.md 或附属路径 */
 const selectedFile = ref('SKILL.md')
 
 const editName = ref('')
 const editDescription = ref('')
 const editContent = ref('')
+/** 附属文件本地草稿（含未保存） */
+const companionFiles = ref<SkillFile[]>([])
 const overviewDirty = ref(false)
 const contentDirty = ref(false)
+const filesDirty = ref(false)
+
+const creatingFile = ref(false)
+const newFilePath = ref('')
+const pendingDeleteFile = ref('')
 
 const pendingDelete = ref(false)
 const showBind = ref(false)
@@ -50,8 +59,30 @@ const skillId = computed(() => String(route.params.skillId || ''))
 
 const usedAgents = computed(() => skill.value?.agents || [])
 
-const fileCount = computed(() => 1)
-const companionCount = computed(() => 0)
+const companionCount = computed(() => companionFiles.value.length)
+const fileCount = computed(() => 1 + companionCount.value)
+const isMainFile = computed(() => selectedFile.value === 'SKILL.md')
+const selectedCompanion = computed(() =>
+  companionFiles.value.find((f) => f.path === selectedFile.value) || null,
+)
+function countChangedCompanions() {
+  const saved = skill.value?.files || []
+  const savedMap = new Map(saved.map((f) => [f.path, f.content || '']))
+  let n = 0
+  const curPaths = new Set(companionFiles.value.map((f) => f.path))
+  for (const f of companionFiles.value) {
+    if (!savedMap.has(f.path) || savedMap.get(f.path) !== (f.content || '')) n += 1
+  }
+  for (const f of saved) {
+    if (!curPaths.has(f.path)) n += 1
+  }
+  return n
+}
+
+const dirtyFileCount = computed(
+  () => (contentDirty.value ? 1 : 0) + countChangedCompanions(),
+)
+const hasFileChanges = computed(() => dirtyFileCount.value > 0)
 
 function agentSubtitle(a: { id: string; description?: string }) {
   if (a.description?.trim()) return a.description.trim()
@@ -110,7 +141,22 @@ const sourceHint = computed(() => {
   return sourceLabel(s.sourceType)
 })
 
-const previewHtml = computed(() => renderMarkdown(editContent.value || skill.value?.content || ''))
+const previewHtml = computed(() => {
+  if (!isMainFile.value) {
+    return renderMarkdown(selectedCompanion.value?.content || '')
+  }
+  return renderMarkdown(editContent.value || skill.value?.content || '')
+})
+
+function hydrateFiles(s: Skill) {
+  companionFiles.value = (s.files || []).map((f) => ({
+    path: f.path,
+    content: f.content || '',
+  }))
+  filesDirty.value = false
+  creatingFile.value = false
+  newFilePath.value = ''
+}
 
 async function load() {
   if (!skillId.value) return
@@ -128,6 +174,7 @@ async function load() {
     editName.value = s.name
     editDescription.value = s.description || ''
     editContent.value = s.content || ''
+    hydrateFiles(s)
     overviewDirty.value = false
     contentDirty.value = false
     fileMode.value = 'preview'
@@ -148,6 +195,126 @@ function markOverviewDirty() {
 function markContentDirty() {
   contentDirty.value = true
   okMsg.value = ''
+}
+
+function markFilesDirty() {
+  filesDirty.value = true
+  okMsg.value = ''
+}
+
+function selectFile(path: string) {
+  selectedFile.value = path
+  creatingFile.value = false
+  if (path === 'SKILL.md') {
+    fileMode.value = contentDirty.value ? 'edit' : 'preview'
+  } else {
+    fileMode.value = 'edit'
+  }
+}
+
+function startCreateFile() {
+  creatingFile.value = true
+  newFilePath.value = ''
+  err.value = ''
+}
+
+function cancelCreateFile() {
+  creatingFile.value = false
+  newFilePath.value = ''
+}
+
+function normalizeNewPath(raw: string) {
+  return raw.trim().replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+function confirmCreateFile() {
+  const path = normalizeNewPath(newFilePath.value)
+  if (!path) {
+    err.value = '请输入文件路径'
+    return
+  }
+  if (path.toLowerCase() === 'skill.md') {
+    err.value = 'SKILL.md 已是主文件，请换一个路径'
+    return
+  }
+  if (path.includes('..')) {
+    err.value = '非法文件路径'
+    return
+  }
+  if (companionFiles.value.some((f) => f.path.toLowerCase() === path.toLowerCase())) {
+    err.value = '文件已存在'
+    return
+  }
+  companionFiles.value = [...companionFiles.value, { path, content: '' }]
+  markFilesDirty()
+  creatingFile.value = false
+  newFilePath.value = ''
+  selectFile(path)
+  err.value = ''
+}
+
+function updateCompanionContent(value: string) {
+  const path = selectedFile.value
+  companionFiles.value = companionFiles.value.map((f) =>
+    f.path === path ? { ...f, content: value } : f,
+  )
+  markFilesDirty()
+}
+
+function askDeleteCompanion(path: string) {
+  pendingDeleteFile.value = path
+}
+
+function confirmDeleteCompanion() {
+  const path = pendingDeleteFile.value
+  if (!path) return
+  companionFiles.value = companionFiles.value.filter((f) => f.path !== path)
+  markFilesDirty()
+  pendingDeleteFile.value = ''
+  if (selectedFile.value === path) selectFile('SKILL.md')
+}
+
+function discardFileChanges() {
+  if (!skill.value) return
+  editContent.value = skill.value.content || ''
+  contentDirty.value = false
+  hydrateFiles(skill.value)
+  if (
+    selectedFile.value !== 'SKILL.md' &&
+    !companionFiles.value.some((f) => f.path === selectedFile.value)
+  ) {
+    selectedFile.value = 'SKILL.md'
+  }
+  fileMode.value = isMainFile.value ? 'preview' : 'edit'
+  okMsg.value = ''
+}
+
+async function saveAllFiles() {
+  if (!skill.value) return
+  busy.value = true
+  err.value = ''
+  okMsg.value = ''
+  try {
+    const body: Record<string, unknown> = {
+      files: companionFiles.value.map((f) => ({ path: f.path, content: f.content || '' })),
+    }
+    if (contentDirty.value) body.content = editContent.value
+    skill.value = await apiFetch<Skill>(`/api/skills/${skill.value.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+    editName.value = skill.value.name
+    editDescription.value = skill.value.description || ''
+    editContent.value = skill.value.content || ''
+    hydrateFiles(skill.value)
+    contentDirty.value = false
+    okMsg.value = '已保存文件修改'
+    if (isMainFile.value) fileMode.value = 'preview'
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : '保存失败'
+  } finally {
+    busy.value = false
+  }
 }
 
 async function saveOverview() {
@@ -171,31 +338,9 @@ async function saveOverview() {
     editName.value = skill.value.name
     editDescription.value = skill.value.description || ''
     editContent.value = skill.value.content || ''
+    if (!hasFileChanges.value) hydrateFiles(skill.value)
     overviewDirty.value = false
     okMsg.value = '已保存'
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : '保存失败'
-  } finally {
-    busy.value = false
-  }
-}
-
-async function saveContent() {
-  if (!skill.value) return
-  busy.value = true
-  err.value = ''
-  okMsg.value = ''
-  try {
-    skill.value = await apiFetch<Skill>(`/api/skills/${skill.value.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ content: editContent.value }),
-    })
-    editName.value = skill.value.name
-    editDescription.value = skill.value.description || ''
-    editContent.value = skill.value.content || ''
-    contentDirty.value = false
-    okMsg.value = '已保存 SKILL.md'
-    fileMode.value = 'preview'
   } catch (e) {
     err.value = e instanceof Error ? e.message : '保存失败'
   } finally {
@@ -380,7 +525,7 @@ onMounted(load)
                   type="button"
                   class="file-item"
                   :class="{ on: selectedFile === 'SKILL.md' }"
-                  @click="selectedFile = 'SKILL.md'"
+                  @click="selectFile('SKILL.md')"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path
@@ -394,17 +539,50 @@ onMounted(load)
               </div>
               <div class="file-group">
                 <div class="file-group-title">附属文件 {{ companionCount }}</div>
-                <p class="file-empty">暂无附属文件。</p>
+                <button
+                  v-for="f in companionFiles"
+                  :key="f.path"
+                  type="button"
+                  class="file-item"
+                  :class="{ on: selectedFile === f.path }"
+                  @click="selectFile(f.path)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    />
+                  </svg>
+                  <span class="file-name">{{ f.path }}</span>
+                </button>
+                <p v-if="!companionFiles.length && !creatingFile" class="file-empty">暂无附属文件。</p>
               </div>
+
+              <div v-if="creatingFile" class="new-file-form">
+                <input
+                  v-model="newFilePath"
+                  type="text"
+                  class="new-file-input"
+                  placeholder="例如 templates/review.md"
+                  autofocus
+                  @keydown.enter.prevent="confirmCreateFile"
+                  @keydown.escape.prevent="cancelCreateFile"
+                />
+                <div class="new-file-actions">
+                  <button type="button" class="btn-add sm" @click="confirmCreateFile">添加</button>
+                  <button type="button" class="btn-ghost sm" @click="cancelCreateFile">取消</button>
+                </div>
+              </div>
+              <button
+                v-else
+                type="button"
+                class="btn-new-file"
+                @click="startCreateFile"
+              >
+                + 新建文件
+              </button>
             </div>
-            <button
-              type="button"
-              class="btn-new-file"
-              disabled
-              title="完整多文件目录树后续支持"
-            >
-              + 新建文件
-            </button>
           </template>
         </aside>
 
@@ -469,45 +647,69 @@ onMounted(load)
 
           <template v-else>
             <div class="file-toolbar">
-              <strong>{{ selectedFile }}</strong>
-              <div class="mode-toggle" role="tablist" aria-label="文件模式">
+              <strong class="file-title">{{ selectedFile }}</strong>
+              <div class="file-toolbar-right">
+                <template v-if="isMainFile">
+                  <div class="mode-toggle" role="tablist" aria-label="文件模式">
+                    <button
+                      type="button"
+                      role="tab"
+                      :aria-selected="fileMode === 'preview'"
+                      :class="{ on: fileMode === 'preview' }"
+                      @click="setFileMode('preview')"
+                    >
+                      预览
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      :aria-selected="fileMode === 'edit'"
+                      :class="{ on: fileMode === 'edit' }"
+                      @click="setFileMode('edit')"
+                    >
+                      编辑
+                    </button>
+                  </div>
+                </template>
                 <button
+                  v-else
                   type="button"
-                  role="tab"
-                  :aria-selected="fileMode === 'preview'"
-                  :class="{ on: fileMode === 'preview' }"
-                  @click="setFileMode('preview')"
+                  class="icon-btn danger sm"
+                  title="删除文件"
+                  aria-label="删除文件"
+                  @click="askDeleteCompanion(selectedFile)"
                 >
-                  预览
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  :aria-selected="fileMode === 'edit'"
-                  :class="{ on: fileMode === 'edit' }"
-                  @click="setFileMode('edit')"
-                >
-                  编辑
+                  <ActionIcon name="delete" />
                 </button>
               </div>
             </div>
 
-            <div v-if="fileMode === 'preview'" class="md-preview" v-html="previewHtml" />
+            <template v-if="isMainFile && fileMode === 'preview'">
+              <div class="md-preview" v-html="previewHtml" />
+            </template>
             <div v-else class="edit-pane">
               <textarea
+                v-if="isMainFile"
                 v-model="editContent"
                 class="content"
                 spellcheck="false"
                 @input="markContentDirty"
               />
-              <div class="edit-actions">
-                <button
-                  type="button"
-                  class="btn-add"
-                  :disabled="busy || !contentDirty"
-                  @click="saveContent"
-                >
-                  {{ busy ? '保存中…' : '保存 SKILL.md' }}
+              <textarea
+                v-else
+                class="content"
+                :value="selectedCompanion?.content || ''"
+                placeholder="文件内容…"
+                spellcheck="false"
+                @input="updateCompanionContent(($event.target as HTMLTextAreaElement).value)"
+              />
+              <div v-if="hasFileChanges" class="edit-actions">
+                <span class="dirty-hint">已修改: {{ dirtyFileCount }} 个文件</span>
+                <button type="button" class="btn-ghost" :disabled="busy" @click="discardFileChanges">
+                  丢弃
+                </button>
+                <button type="button" class="btn-add" :disabled="busy" @click="saveAllFiles">
+                  {{ busy ? '保存中…' : '保存修改' }}
                 </button>
               </div>
             </div>
@@ -565,6 +767,16 @@ onMounted(load)
       :busy="busy"
       @cancel="pendingDelete = false"
       @confirm="confirmDelete"
+    />
+    <ConfirmDialog
+      v-if="pendingDeleteFile"
+      :open="true"
+      :title="`删除文件「${pendingDeleteFile}」？`"
+      description="删除后需点击「保存修改」才会写入服务端；也可先丢弃本地改动。"
+      confirm-label="删除"
+      tone="danger"
+      @cancel="pendingDeleteFile = ''"
+      @confirm="confirmDeleteCompanion"
     />
   </section>
 </template>
@@ -698,9 +910,6 @@ onMounted(load)
   background: #fafafa;
   min-height: 100%;
 }
-.detail-aside.files {
-  padding-bottom: 12px;
-}
 .aside-scroll {
   flex: 1;
   min-height: 0;
@@ -708,7 +917,6 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding-bottom: 12px;
 }
 .detail-main {
   display: flex;
@@ -784,6 +992,11 @@ input, textarea {
 }
 .file-item:hover { background: #f3f4f6; }
 .file-item.on { background: #eef2f7; }
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .file-empty {
   margin: 0;
   padding: 4px 10px;
@@ -791,8 +1004,6 @@ input, textarea {
   color: var(--muted);
 }
 .btn-new-file {
-  margin-top: auto;
-  flex-shrink: 0;
   width: 100%;
   border: 1px solid var(--border);
   background: #fff;
@@ -800,8 +1011,34 @@ input, textarea {
   padding: 9px 10px;
   font-size: 13px;
   font-weight: 500;
-  color: #6b7280;
-  cursor: not-allowed;
+  color: #374151;
+  cursor: pointer;
+  text-align: left;
+}
+.btn-new-file:hover { background: #f9fafb; }
+.new-file-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.new-file-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+}
+.new-file-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-add.sm,
+.btn-ghost.sm {
+  padding: 7px 12px;
+  font-size: 12px;
 }
 .file-toolbar {
   display: flex;
@@ -811,9 +1048,22 @@ input, textarea {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
-.file-toolbar strong {
+.file-title {
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.icon-btn.sm {
+  width: 32px;
+  height: 32px;
 }
 .mode-toggle {
   display: inline-flex;
@@ -916,10 +1166,19 @@ textarea.content {
 .edit-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: #fafafa;
+}
+.dirty-hint {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+textarea.content::placeholder {
+  color: #9ca3af;
 }
 
 .actions { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -1081,6 +1340,5 @@ textarea.content {
     min-height: 220px;
   }
   .detail-aside:not(.files) { display: none; }
-  .btn-new-file { margin-top: 8px; }
 }
 </style>
