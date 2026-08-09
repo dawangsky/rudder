@@ -193,16 +193,81 @@ func parseFrontmatter(content string) (name, description string) {
 	if len(m) < 2 {
 		return "", ""
 	}
-	for _, line := range strings.Split(m[1], "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
-			name = unquote(strings.TrimSpace(strings.TrimPrefix(line, "name:")))
-		}
-		if strings.HasPrefix(line, "description:") {
-			description = unquote(strings.TrimSpace(strings.TrimPrefix(line, "description:")))
-		}
+	meta := parseYamlSimple(m[1])
+	return strings.TrimSpace(meta["name"]), strings.TrimSpace(meta["description"])
+}
+
+func isYamlBlockIndicator(val string) bool {
+	switch val {
+	case ">", ">-", ">+", "|", "|-", "|+":
+		return true
+	default:
+		return false
 	}
-	return name, description
+}
+
+// parseYamlSimple 极简 YAML：支持同行值与 >- / | 多行块（对齐 server SkillMarkdown）。
+func parseYamlSimple(yaml string) map[string]string {
+	out := map[string]string{}
+	lines := strings.Split(yaml, "\n")
+	var currentKey string
+	var block []string
+	inBlock := false
+	folded := false
+
+	flush := func() {
+		if !inBlock || currentKey == "" {
+			return
+		}
+		var text string
+		if folded {
+			parts := make([]string, 0, len(block))
+			for _, l := range block {
+				t := strings.TrimSpace(l)
+				if t != "" {
+					parts = append(parts, t)
+				}
+			}
+			text = strings.Join(parts, " ")
+		} else {
+			for i, l := range block {
+				block[i] = strings.TrimLeft(l, " \t")
+			}
+			text = strings.TrimSpace(strings.Join(block, "\n"))
+		}
+		out[currentKey] = strings.TrimSpace(text)
+		currentKey = ""
+		block = nil
+		inBlock = false
+		folded = false
+	}
+
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if inBlock {
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || strings.TrimSpace(line) == "" {
+				block = append(block, strings.TrimLeft(line, " \t"))
+				continue
+			}
+			flush()
+		}
+		colon := strings.IndexByte(line, ':')
+		if colon <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:colon])
+		val := strings.TrimSpace(line[colon+1:])
+		if isYamlBlockIndicator(val) {
+			currentKey = key
+			block = nil
+			inBlock = true
+			folded = strings.HasPrefix(val, ">")
+			continue
+		}
+		out[key] = unquote(val)
+	}
+	flush()
+	return out
 }
 
 func unquote(s string) string {

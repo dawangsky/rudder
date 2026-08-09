@@ -60,20 +60,61 @@ function unquote(s: string): string {
   return s
 }
 
+function isYamlBlockIndicator(val: string): boolean {
+  return val === '>' || val === '>-' || val === '|' || val === '|-' || val === '|+' || val === '>+'
+}
+
+/** 极简 YAML：支持 name/description 的同行值与 >- / | 多行块。 */
+function parseYamlSimple(yaml: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  const lines = yaml.split(/\r?\n/)
+  let currentKey: string | null = null
+  let block: string[] | null = null
+  let folded = false
+
+  const flush = () => {
+    if (!currentKey || !block) return
+    const text = folded
+      ? block.map((l) => l.trim()).filter(Boolean).join(' ')
+      : block.join('\n').replace(/^[ \t]+/gm, '').trim()
+    out[currentKey] = text.trim()
+    currentKey = null
+    block = null
+    folded = false
+  }
+
+  for (const line of lines) {
+    if (block) {
+      if (/^[ \t]/.test(line) || line.trim() === '') {
+        block.push(line.replace(/^[ \t]/, ''))
+        continue
+      }
+      flush()
+    }
+    const colon = line.indexOf(':')
+    if (colon <= 0) continue
+    const key = line.slice(0, colon).trim()
+    const val = line.slice(colon + 1).trim()
+    if (isYamlBlockIndicator(val)) {
+      currentKey = key
+      block = []
+      folded = val.startsWith('>')
+      continue
+    }
+    out[key] = unquote(val)
+  }
+  flush()
+  return out
+}
+
 function parseFrontmatter(content: string): { name: string; description: string } {
   const m = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?/)
   if (!m) return { name: '', description: '' }
-  let name = ''
-  let description = ''
-  for (const line of m[1].split('\n')) {
-    const t = line.trim()
-    if (t.startsWith('name:')) {
-      name = unquote(t.slice('name:'.length).trim())
-    } else if (t.startsWith('description:')) {
-      description = unquote(t.slice('description:'.length).trim())
-    }
+  const meta = parseYamlSimple(m[1])
+  return {
+    name: (meta.name || '').trim(),
+    description: (meta.description || '').trim(),
   }
-  return { name, description }
 }
 
 function toDisplayPath(absPath: string, home: string): string {
