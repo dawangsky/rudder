@@ -1,7 +1,6 @@
 ---
 description: 前端优先 TypeScript；能用 TS 就不用 JS
-globs: web/**/*.{ts,tsx,vue,js,mjs,cjs},desktop/**/*.{ts,js,mjs,cjs}
-alwaysApply: false
+alwaysApply: true
 ---
 
 # 前端 TypeScript 优先

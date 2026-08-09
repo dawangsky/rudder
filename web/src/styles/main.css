@@ -62,7 +62,8 @@ input {
 .content > .page,
 .content > .inbox-shell,
 .content > .chat-shell,
-.content > .settings-shell {
+.content > .settings-shell,
+.content > .issues-shell {
   flex: 1;
   min-height: 0;
 }

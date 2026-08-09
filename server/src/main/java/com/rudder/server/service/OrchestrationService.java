@@ -161,7 +161,8 @@ public class OrchestrationService {
         issue.setWorkspaceId(p.workspaceId());
         issue.setTitle(require(body.get("title"), "标题不能为空"));
         issue.setDescription(str(body.get("description")));
-        issue.setStatus(StringUtils.hasText(str(body.get("status"))) ? str(body.get("status")) : "todo");
+        String statusRaw = str(body.get("status"));
+        issue.setStatus(StringUtils.hasText(statusRaw) ? IssueStatuses.requireValid(statusRaw) : IssueStatuses.TODO);
         issue.setPriority(StringUtils.hasText(str(body.get("priority"))) ? str(body.get("priority")) : "medium");
         issue.setProjectId(asLong(body.get("projectId")));
         issue.setCreatedBy(p.userId());
@@ -192,7 +193,7 @@ public class OrchestrationService {
         boolean assigneeChanged = false;
         if (body.containsKey("title")) issue.setTitle(require(body.get("title"), "标题不能为空"));
         if (body.containsKey("description")) issue.setDescription(str(body.get("description")));
-        if (body.containsKey("status")) issue.setStatus(str(body.get("status")));
+        if (body.containsKey("status")) issue.setStatus(IssueStatuses.requireValid(str(body.get("status"))));
         if (body.containsKey("priority")) issue.setPriority(str(body.get("priority")));
         if (body.containsKey("projectId")) issue.setProjectId(asLong(body.get("projectId")));
         if (body.containsKey("assigneeType") || body.containsKey("assigneeId")) {
@@ -595,11 +596,14 @@ public class OrchestrationService {
         m.put("id", String.valueOf(i.getId()));
         m.put("title", i.getTitle());
         m.put("description", i.getDescription());
-        m.put("status", i.getStatus());
+        String status = IssueStatuses.normalize(i.getStatus());
+        m.put("status", status != null ? status : IssueStatuses.TODO);
         m.put("priority", i.getPriority());
         m.put("assigneeType", i.getAssigneeType());
         m.put("assigneeId", i.getAssigneeId() == null ? null : String.valueOf(i.getAssigneeId()));
         m.put("projectId", i.getProjectId() == null ? null : String.valueOf(i.getProjectId()));
+        m.put("createdAt", i.getCreatedAt() == null ? null : i.getCreatedAt().toString());
+        m.put("updatedAt", i.getUpdatedAt() == null ? null : i.getUpdatedAt().toString());
         return m;
     }
 

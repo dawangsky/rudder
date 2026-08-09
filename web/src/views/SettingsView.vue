@@ -6,7 +6,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getServerBaseUrl, setServerBaseUrl } from '@/lib/config'
-import { getHostBridge, type DaemonStatus } from '@/lib/hostBridge'
+import { getHostBridge, isDesktopHost, type CloseAction, type DaemonStatus } from '@/lib/hostBridge'
 import { getSessionEmail } from '@/lib/session'
 import AlertDialog from '@/components/AlertDialog.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
@@ -101,6 +101,11 @@ async function stopDaemon() {
 
 async function togglePref(key: 'autoStartOnLaunch' | 'autoStopOnQuit', value: boolean) {
   await getHostBridge().setDaemonPrefs({ [key]: value })
+  await refresh()
+}
+
+async function setCloseAction(value: CloseAction) {
+  await getHostBridge().setDaemonPrefs({ closeAction: value })
   await refresh()
 }
 
@@ -234,6 +239,7 @@ watch(
     if (section.value === 'general') {
       serverUrl.value = getServerBaseUrl()
       saved.value = false
+      void refresh()
     }
     if (section.value === 'protocols') void refreshProtocols()
   },
@@ -400,7 +406,7 @@ onUnmounted(() => {
       <div v-else-if="section === 'general'" class="panel-page">
         <header class="page-head">
           <h2>一般</h2>
-          <p class="desc">Self-Host Server 连接地址。</p>
+          <p class="desc">Self-Host Server 连接与 Desktop 窗口行为。</p>
         </header>
         <label class="field">
           Server 地址
@@ -408,6 +414,43 @@ onUnmounted(() => {
         </label>
         <button type="button" class="primary" @click="saveServer">保存</button>
         <p v-if="saved" class="ok">已保存到本地。</p>
+
+        <div v-if="isDesktopHost()" class="card close-card">
+          <div class="row-title">关闭窗口时</div>
+          <div class="row-desc">点击窗口关闭按钮时的默认行为。选择「每次询问」会弹出确认框。</div>
+          <div class="close-opts" role="radiogroup" aria-label="关闭窗口时">
+            <label class="close-opt">
+              <input
+                type="radio"
+                name="closeAction"
+                value="ask"
+                :checked="(status?.closeAction || 'ask') === 'ask'"
+                @change="setCloseAction('ask')"
+              />
+              <span>每次询问</span>
+            </label>
+            <label class="close-opt">
+              <input
+                type="radio"
+                name="closeAction"
+                value="minimize"
+                :checked="status?.closeAction === 'minimize'"
+                @change="setCloseAction('minimize')"
+              />
+              <span>最小化到托盘</span>
+            </label>
+            <label class="close-opt">
+              <input
+                type="radio"
+                name="closeAction"
+                value="quit"
+                :checked="status?.closeAction === 'quit'"
+                @change="setCloseAction('quit')"
+              />
+              <span>退出程序</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div v-else-if="section === 'protocols'" class="panel-page protocols-page">
@@ -611,6 +654,27 @@ onUnmounted(() => {
 .row-item:last-child { border-bottom: none; }
 .row-title { font-size: 14px; font-weight: 600; }
 .row-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.close-card {
+  margin-top: 20px;
+  padding: 16px;
+}
+.close-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 12px;
+}
+.close-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.close-opt input {
+  accent-color: #1c2333;
+}
 .cli-line { font-size: 13px; color: var(--text); }
 .warn-inline { color: var(--danger, #c44); margin-left: 6px; }
 .proto-grid {

@@ -21,6 +21,7 @@ type WorkspaceItem = {
   name: string
   slug?: string
   role?: string
+  issuePrefix?: string
 }
 
 const stroke =

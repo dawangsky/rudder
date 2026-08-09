@@ -34,7 +34,7 @@ public class IssueEntity {
     @TableField("description")
     private String description;
 
-    /** 状态：todo / doing / done */
+    /** 状态：backlog / todo / in_progress / in_review / done（旧值 doing 读时归一为 in_progress） */
     @TableField("status")
     private String status;
 
