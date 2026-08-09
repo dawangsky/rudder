@@ -2,12 +2,14 @@
 /**
  * Skills：工作区共享指令；支持手动创建 / URL 导入 / 从运行时复制。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { apiFetch } from '@/lib/api'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
 import ActionIcon from '@/components/ActionIcon.vue'
+import ProviderIcon from '@/components/ProviderIcon.vue'
 import { getHostBridge, isDesktopHost } from '@/lib/hostBridge'
+import { getCustomProviderIcon, ICONS_CHANGED_EVENT } from '@/lib/providerIcons'
 import {
   defaultSkillMarkdown,
   formatSkillDisplayPath,
@@ -18,7 +20,7 @@ import {
   type Skill,
   type SkillUrlPreview,
 } from '@/lib/skills'
-import { displayName, providerLabel, type Runtime } from '@/lib/runtimes'
+import { displayName, iconProvider, providerLabel, type Runtime } from '@/lib/runtimes'
 
 type Step = 'picker' | 'manual' | 'url' | 'runtime'
 
@@ -48,6 +50,18 @@ const runtimeQuery = ref('')
 /** 仅选中 1 个时，可编辑导入到工作区的名称/描述 */
 const importName = ref('')
 const importDescription = ref('')
+/** 自定义图标变更时递增，驱动重绘 */
+const iconTick = ref(0)
+
+function onIconsChanged() {
+  iconTick.value += 1
+}
+
+function customIconFor(r: Runtime | null | undefined) {
+  void iconTick.value
+  if (!r) return ''
+  return getCustomProviderIcon(r.daemonId, r.provider)
+}
 
 const onlineRuntimes = computed(() =>
   runtimes.value.filter((r) => (r.status || '').toLowerCase() === 'online'),
@@ -415,7 +429,13 @@ function skillPath(s: RuntimeSkill) {
   return s.displayPath || formatSkillDisplayPath(s.sourcePath)
 }
 
-onMounted(load)
+onMounted(() => {
+  window.addEventListener(ICONS_CHANGED_EVENT, onIconsChanged)
+  void load()
+})
+onUnmounted(() => {
+  window.removeEventListener(ICONS_CHANGED_EVENT, onIconsChanged)
+})
 </script>
 
 <template>
@@ -616,21 +636,35 @@ onMounted(load)
         <div v-else class="runtime-panel">
           <label class="rt-label">
             运行时
-            <select v-model="selectedRuntimeId">
-              <option disabled value="">选择在线运行时</option>
-              <option v-for="r in onlineRuntimes" :key="r.id" :value="r.id">
-                {{ runtimeOptionLabel(r) }}
-              </option>
-            </select>
+            <div class="rt-select-wrap">
+              <ProviderIcon
+                v-if="selectedRuntime"
+                class="rt-select-icon"
+                :provider="iconProvider(selectedRuntime)"
+                :custom-src="customIconFor(selectedRuntime)"
+                :size="18"
+                :title="providerLabel(selectedRuntime)"
+              />
+              <select
+                v-model="selectedRuntimeId"
+                :class="{ 'has-icon': !!selectedRuntime }"
+              >
+                <option disabled value="">选择在线运行时</option>
+                <option v-for="r in onlineRuntimes" :key="r.id" :value="r.id">
+                  {{ runtimeOptionLabel(r) }}
+                </option>
+              </select>
+            </div>
           </label>
 
           <div v-if="selectedRuntime" class="rt-card">
-            <span class="rt-card-icon" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6" />
-                <path d="M8 20h8M12 18v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-              </svg>
-            </span>
+            <ProviderIcon
+              class="rt-card-icon"
+              :provider="iconProvider(selectedRuntime)"
+              :custom-src="customIconFor(selectedRuntime)"
+              :size="22"
+              :title="providerLabel(selectedRuntime)"
+            />
             <div class="rt-card-text">
               <strong>{{ displayName(selectedRuntime) }}</strong>
               <small>{{ selectedRuntime.hostName || '本机' }}</small>
@@ -1024,6 +1058,20 @@ tr:last-child td { border-bottom: none; }
   margin-bottom: 10px;
   flex-shrink: 0;
 }
+.rt-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.rt-select-icon {
+  position: absolute;
+  left: 10px;
+  z-index: 1;
+  pointer-events: none;
+}
+.rt-select-wrap select.has-icon {
+  padding-left: 34px;
+}
 .rt-card {
   display: flex;
   align-items: center;
@@ -1039,8 +1087,8 @@ tr:last-child td { border-bottom: none; }
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  background: #eef2ff;
-  color: #4338ca;
+  background: #fff;
+  border: 1px solid var(--border);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1152,7 +1200,8 @@ tr:last-child td { border-bottom: none; }
 }
 .rt-files {
   font-size: 11px;
-  color: var(--muted);
+  font-weight: 700;
+  color: var(--text);
   white-space: nowrap;
   flex-shrink: 0;
 }
