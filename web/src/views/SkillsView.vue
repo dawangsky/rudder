@@ -256,11 +256,17 @@ function normalizeReported(list: RuntimeSkill[]): RuntimeSkill[] {
   }))
 }
 
-async function loadRuntimeSkills(opts?: { soft?: boolean }) {
+function pruneSelectedRuntimeSkills() {
+  const alive = new Set(runtimeSkills.value.map((s) => s.id))
+  selectedRuntimeSkillIds.value = selectedRuntimeSkillIds.value.filter((id) => alive.has(id))
+}
+
+async function loadRuntimeSkills(opts?: { soft?: boolean; force?: boolean }) {
   const soft = !!opts?.soft
+  const force = !!opts?.force
   runtimeErr.value = ''
-  // soft：保留现有列表，避免切换运行时整页闪白；仅首扫时显示 loading
-  if (!soft || !runtimeSkills.value.length) {
+  // soft：保留现有列表，避免切换运行时整页闪白；force/首扫时显示 loading（刷新按钮转圈）
+  if (force || !soft || !runtimeSkills.value.length) {
     runtimeSkillLoading.value = true
   }
   if (!soft) {
@@ -269,7 +275,7 @@ async function loadRuntimeSkills(opts?: { soft?: boolean }) {
   try {
     // Desktop：直接扫本机磁盘（与目标 UI 一致，不依赖 Daemon 上报缓存）
     if (isDesktopHost()) {
-      if (localSkillsReady.value && runtimeSkills.value.length) {
+      if (!force && localSkillsReady.value && runtimeSkills.value.length) {
         return
       }
       const res = await getHostBridge().scanLocalSkills()
@@ -287,6 +293,7 @@ async function loadRuntimeSkills(opts?: { soft?: boolean }) {
           source: 'local',
         }))
         localSkillsReady.value = true
+        if (soft) pruneSelectedRuntimeSkills()
         return
       }
       localSkillsReady.value = res.ok
@@ -309,7 +316,8 @@ async function loadRuntimeSkills(opts?: { soft?: boolean }) {
     )
     if (reported.length) {
       runtimeSkills.value = normalizeReported(reported)
-      if (!soft) selectedRuntimeSkillIds.value = []
+      if (soft) pruneSelectedRuntimeSkills()
+      else selectedRuntimeSkillIds.value = []
       return
     }
 
@@ -324,6 +332,13 @@ async function loadRuntimeSkills(opts?: { soft?: boolean }) {
   } finally {
     runtimeSkillLoading.value = false
   }
+}
+
+/** 手动重新扫描本机 skill（保留列表至结果返回，避免闪动）。 */
+async function refreshRuntimeSkills() {
+  if (runtimeSkillLoading.value || busy.value) return
+  localSkillsReady.value = false
+  await loadRuntimeSkills({ soft: true, force: true })
 }
 
 function toggleRuntimeSkill(id: string) {
@@ -736,12 +751,52 @@ onUnmounted(() => {
               <strong>{{ displayName(selectedRuntime) }}</strong>
               <small>{{ selectedRuntime.hostName || '本机' }}</small>
             </div>
-            <span
-              class="rt-status"
-              :class="{ online: (selectedRuntime.status || '').toLowerCase() === 'online' }"
-            >
-              {{ (selectedRuntime.status || '').toLowerCase() === 'online' ? 'online' : (selectedRuntime.status || 'offline') }}
-            </span>
+            <div class="rt-card-aside">
+              <span
+                class="rt-status"
+                :class="{ online: (selectedRuntime.status || '').toLowerCase() === 'online' }"
+              >
+                {{ (selectedRuntime.status || '').toLowerCase() === 'online' ? 'online' : (selectedRuntime.status || 'offline') }}
+              </span>
+              <button
+                type="button"
+                class="rt-refresh"
+                :disabled="runtimeSkillLoading || busy"
+                title="重新扫描本机 skill"
+                aria-label="重新扫描本机 skill"
+                @click="refreshRuntimeSkills"
+              >
+                <svg
+                  class="rt-refresh-ico"
+                  :class="{ spinning: runtimeSkillLoading }"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 12a8 8 0 0 1 13.7-5.6"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M20 12a8 8 0 0 1-13.7 5.6"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M17 3.8V7h3.2M7 20.2V17H3.8"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <p v-if="!onlineRuntimes.length" class="hint">
@@ -1239,15 +1294,52 @@ tr:last-child td { border-bottom: none; }
   flex: 1;
   min-width: 0;
 }
-.rt-card-text strong { font-size: 13px; font-weight: 650; }
-.rt-card-text small { font-size: 12px; color: var(--muted); }
+.rt-card-text strong { font-size: 13px; font-weight: 700; }
+.rt-card-text small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.rt-card-aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
 .rt-status {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: #9ca3af;
   text-transform: lowercase;
+  letter-spacing: 0.01em;
 }
 .rt-status.online { color: #16a34a; }
+.rt-refresh {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0;
+}
+.rt-refresh:hover:not(:disabled) {
+  background: #fff;
+  border-color: var(--border);
+  color: var(--text);
+}
+.rt-refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.rt-refresh-ico { display: block; }
+.rt-refresh-ico.spinning {
+  animation: rt-spin 0.8s linear infinite;
+}
+@keyframes rt-spin {
+  to { transform: rotate(360deg); }
+}
 .rt-loading { margin: 8px 0 12px; font-size: 13px; }
 .rt-search {
   position: relative;
