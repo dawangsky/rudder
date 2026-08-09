@@ -44,12 +44,16 @@ const urlErr = ref('')
 const selectedRuntimeId = ref('')
 const runtimeSkills = ref<RuntimeSkill[]>([])
 const runtimeSkillLoading = ref(false)
+/** 是否已完成本机扫描（Desktop 下切换运行时无需重扫） */
+const localSkillsReady = ref(false)
 const selectedRuntimeSkillIds = ref<string[]>([])
 const runtimeErr = ref('')
 const runtimeQuery = ref('')
 /** 仅选中 1 个时，可编辑导入到工作区的名称/描述 */
 const importName = ref('')
 const importDescription = ref('')
+/** 自定义运行时下拉（原生 select 无法在选项中画图标） */
+const runtimeMenuOpen = ref(false)
 /** 自定义图标变更时递增，驱动重绘 */
 const iconTick = ref(0)
 
@@ -131,31 +135,51 @@ function openCreate() {
   urlPreview.value = null
   selectedRuntimeId.value = onlineRuntimes.value[0]?.id || ''
   runtimeSkills.value = []
+  localSkillsReady.value = false
   selectedRuntimeSkillIds.value = []
   runtimeQuery.value = ''
   importName.value = ''
   importDescription.value = ''
+  runtimeMenuOpen.value = false
   showCreate.value = true
 }
 
 function closeCreate() {
   if (busy.value) return
+  runtimeMenuOpen.value = false
   showCreate.value = false
 }
 
 function choose(s: Step) {
   step.value = s
+  runtimeMenuOpen.value = false
   if (s === 'runtime') {
     if (!selectedRuntimeId.value && onlineRuntimes.value[0]) {
       selectedRuntimeId.value = onlineRuntimes.value[0].id
     }
-    void loadRuntimeSkills()
+    void loadRuntimeSkills({ soft: false })
   }
 }
 
-watch(selectedRuntimeId, () => {
-  if (step.value === 'runtime') void loadRuntimeSkills()
-})
+function selectRuntime(id: string) {
+  if (selectedRuntimeId.value === id) {
+    runtimeMenuOpen.value = false
+    return
+  }
+  selectedRuntimeId.value = id
+  runtimeMenuOpen.value = false
+  // Desktop 本机扫描与所选运行时无关：只换图标/状态卡，不重扫、不闪列表
+  if (isDesktopHost() && localSkillsReady.value) return
+  void loadRuntimeSkills({ soft: true })
+}
+
+function onDocPointerDown(ev: PointerEvent) {
+  if (!runtimeMenuOpen.value) return
+  const t = ev.target
+  if (!(t instanceof Element)) return
+  if (t.closest('.rt-combo')) return
+  runtimeMenuOpen.value = false
+}
 
 async function createManual() {
   busy.value = true
@@ -232,14 +256,22 @@ function normalizeReported(list: RuntimeSkill[]): RuntimeSkill[] {
   }))
 }
 
-async function loadRuntimeSkills() {
-  runtimeSkills.value = []
-  selectedRuntimeSkillIds.value = []
+async function loadRuntimeSkills(opts?: { soft?: boolean }) {
+  const soft = !!opts?.soft
   runtimeErr.value = ''
-  runtimeSkillLoading.value = true
+  // soft：保留现有列表，避免切换运行时整页闪白；仅首扫时显示 loading
+  if (!soft || !runtimeSkills.value.length) {
+    runtimeSkillLoading.value = true
+  }
+  if (!soft) {
+    selectedRuntimeSkillIds.value = []
+  }
   try {
     // Desktop：直接扫本机磁盘（与目标 UI 一致，不依赖 Daemon 上报缓存）
     if (isDesktopHost()) {
+      if (localSkillsReady.value && runtimeSkills.value.length) {
+        return
+      }
       const res = await getHostBridge().scanLocalSkills()
       if (res.ok && res.skills.length) {
         runtimeSkills.value = res.skills.map((s) => ({
@@ -254,8 +286,10 @@ async function loadRuntimeSkills() {
           content: s.content,
           source: 'local',
         }))
+        localSkillsReady.value = true
         return
       }
+      localSkillsReady.value = res.ok
       if (res.message && !res.ok) {
         runtimeErr.value = res.message
       }
@@ -275,9 +309,11 @@ async function loadRuntimeSkills() {
     )
     if (reported.length) {
       runtimeSkills.value = normalizeReported(reported)
+      if (!soft) selectedRuntimeSkillIds.value = []
       return
     }
 
+    if (!soft) runtimeSkills.value = []
     if (!runtimeSkills.value.length) {
       runtimeErr.value = isDesktopHost()
         ? '本机未发现 SKILL.md。常见目录：~/.agents/skills、~/.claude/skills、~/.cursor/skills。'
@@ -431,10 +467,12 @@ function skillPath(s: RuntimeSkill) {
 
 onMounted(() => {
   window.addEventListener(ICONS_CHANGED_EVENT, onIconsChanged)
+  document.addEventListener('pointerdown', onDocPointerDown, true)
   void load()
 })
 onUnmounted(() => {
   window.removeEventListener(ICONS_CHANGED_EVENT, onIconsChanged)
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
 })
 </script>
 
@@ -634,28 +672,57 @@ onUnmounted(() => {
         </div>
 
         <div v-else class="runtime-panel">
-          <label class="rt-label">
+          <div class="rt-label">
             运行时
-            <div class="rt-select-wrap">
-              <ProviderIcon
-                v-if="selectedRuntime"
-                class="rt-select-icon"
-                :provider="iconProvider(selectedRuntime)"
-                :custom-src="customIconFor(selectedRuntime)"
-                :size="18"
-                :title="providerLabel(selectedRuntime)"
-              />
-              <select
-                v-model="selectedRuntimeId"
-                :class="{ 'has-icon': !!selectedRuntime }"
+            <div class="rt-combo" :class="{ open: runtimeMenuOpen }">
+              <button
+                type="button"
+                class="rt-combo-trigger"
+                :disabled="!onlineRuntimes.length"
+                aria-haspopup="listbox"
+                :aria-expanded="runtimeMenuOpen"
+                @click="runtimeMenuOpen = !runtimeMenuOpen"
               >
-                <option disabled value="">选择在线运行时</option>
-                <option v-for="r in onlineRuntimes" :key="r.id" :value="r.id">
-                  {{ runtimeOptionLabel(r) }}
-                </option>
-              </select>
+                <ProviderIcon
+                  v-if="selectedRuntime"
+                  :provider="iconProvider(selectedRuntime)"
+                  :custom-src="customIconFor(selectedRuntime)"
+                  :size="18"
+                  :title="providerLabel(selectedRuntime)"
+                />
+                <span class="rt-combo-label">
+                  {{
+                    selectedRuntime
+                      ? runtimeOptionLabel(selectedRuntime)
+                      : '选择在线运行时'
+                  }}
+                </span>
+                <span class="rt-combo-chev" aria-hidden="true">▾</span>
+              </button>
+              <ul
+                v-if="runtimeMenuOpen"
+                class="rt-combo-menu"
+                role="listbox"
+              >
+                <li v-for="r in onlineRuntimes" :key="r.id" role="option">
+                  <button
+                    type="button"
+                    class="rt-combo-option"
+                    :class="{ active: r.id === selectedRuntimeId }"
+                    @click="selectRuntime(r.id)"
+                  >
+                    <ProviderIcon
+                      :provider="iconProvider(r)"
+                      :custom-src="customIconFor(r)"
+                      :size="18"
+                      :title="providerLabel(r)"
+                    />
+                    <span>{{ runtimeOptionLabel(r) }}</span>
+                  </button>
+                </li>
+              </ul>
             </div>
-          </label>
+          </div>
 
           <div v-if="selectedRuntime" class="rt-card">
             <ProviderIcon
@@ -681,7 +748,12 @@ onUnmounted(() => {
             当前没有在线运行时。请先启动本机 Daemon，并确保已连接运行时。
           </p>
 
-          <div v-if="runtimeSkillLoading" class="rt-loading muted">正在扫描本机 skill…</div>
+          <div
+            v-if="runtimeSkillLoading && !runtimeSkills.length"
+            class="rt-loading muted"
+          >
+            正在扫描本机 skill…
+          </div>
 
           <template v-else-if="runtimeSkills.length">
             <div class="rt-search">
@@ -1058,19 +1130,85 @@ tr:last-child td { border-bottom: none; }
   margin-bottom: 10px;
   flex-shrink: 0;
 }
-.rt-select-wrap {
+.rt-combo {
   position: relative;
+}
+.rt-combo-trigger {
+  width: 100%;
   display: flex;
   align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
 }
-.rt-select-icon {
+.rt-combo-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.rt-combo-trigger:hover:not(:disabled) {
+  border-color: #d1d5db;
+}
+.rt-combo.open .rt-combo-trigger {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+.rt-combo-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rt-combo-chev {
+  color: #9ca3af;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.rt-combo-menu {
   position: absolute;
-  left: 10px;
-  z-index: 1;
-  pointer-events: none;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  max-height: 240px;
+  overflow: auto;
 }
-.rt-select-wrap select.has-icon {
-  padding-left: 34px;
+.rt-combo-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.rt-combo-option:hover,
+.rt-combo-option.active {
+  background: #f3f4f6;
+}
+.rt-combo-option.active {
+  font-weight: 600;
 }
 .rt-card {
   display: flex;
