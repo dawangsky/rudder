@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
+    "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "tsx": "^4.23.1",
     "typescript": "~5.7.2",
