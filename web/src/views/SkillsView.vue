@@ -800,7 +800,12 @@ onUnmounted(() => {
           <tr v-if="!filteredItems.length">
             <td colspan="5" class="empty-row muted">没有匹配的 skill</td>
           </tr>
-          <tr v-for="s in filteredItems" :key="s.id">
+          <tr
+            v-for="s in filteredItems"
+            :key="s.id"
+            class="row-click"
+            @click="goDetail(s.id)"
+          >
             <td class="col-check" @click.stop>
               <input
                 type="checkbox"
@@ -810,9 +815,7 @@ onUnmounted(() => {
               />
             </td>
             <td>
-              <button type="button" class="name-link" @click="goDetail(s.id)">
-                {{ s.name }}
-              </button>
+              <span class="name-link">{{ s.name }}</span>
               <span v-if="s.sourceType" class="src-hint">{{ sourceLabel(s.sourceType) }}</span>
             </td>
             <td :class="{ muted: !(s.agentCount || s.agents?.length) }">
@@ -1392,19 +1395,15 @@ th {
   white-space: nowrap;
 }
 tr:last-child td { border-bottom: none; }
+.row-click { cursor: pointer; }
+.row-click:hover td { background: #f9fafb; }
 .col-check { width: 40px; }
 .empty-row { text-align: center; padding: 28px 14px; }
 .name-link {
-  border: none;
-  background: transparent;
-  padding: 0;
-  font: inherit;
   font-weight: 700;
   color: var(--text);
-  cursor: pointer;
-  text-align: left;
 }
-.name-link:hover { color: #2563eb; text-decoration: underline; }
+.row-click:hover .name-link { color: #2563eb; }
 .src-hint {
   display: block;
   margin-top: 2px;
