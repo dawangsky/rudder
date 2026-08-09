@@ -51,6 +51,12 @@ const usedAgents = computed(() => skill.value?.agents || [])
 const fileCount = computed(() => 1)
 const companionCount = computed(() => 0)
 
+function agentSubtitle(a: { id: string; description?: string }) {
+  if (a.description?.trim()) return a.description.trim()
+  const full = agents.value.find((x) => x.id === a.id)
+  return (full?.description || '').trim()
+}
+
 const originLabel = computed(() => {
   const s = skill.value
   if (!s) return ''
@@ -287,7 +293,7 @@ onMounted(load)
                     stroke-linecap="round"
                   />
                 </svg>
-                {{ skill.agentCount || 0 }} 个智能体在用
+                {{ skill.agentCount || 0 }} 个智能体在使用
               </span>
               <span class="meta-item">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -317,137 +323,161 @@ onMounted(load)
         </div>
       </header>
 
-      <div class="tabs">
-        <button type="button" :class="{ on: tab === 'overview' }" @click="tab = 'overview'">概览</button>
-        <button type="button" :class="{ on: tab === 'files' }" @click="tab = 'files'">
-          文件 {{ fileCount }}
-        </button>
-      </div>
-
       <p v-if="err" class="error">{{ err }}</p>
       <p v-if="okMsg" class="ok">{{ okMsg }}</p>
 
-      <div v-if="tab === 'overview'" class="panel">
-        <h3>属性</h3>
-        <p class="hint">这些字段与 SKILL.md 的 frontmatter 保持同步。</p>
-        <label>
-          名称
-          <input v-model="editName" type="text" @input="markOverviewDirty" />
-        </label>
-        <label>
-          描述
-          <textarea v-model="editDescription" rows="5" @input="markOverviewDirty" />
-          <small>{{ editDescription.length }} 个字符 · 智能体用这段文字判断是否加载该 skill</small>
-        </label>
-        <div class="actions">
-          <button type="button" class="btn-add" :disabled="busy || !overviewDirty" @click="saveOverview">
-            {{ busy ? '保存中…' : '保存' }}
+      <div class="detail-shell">
+        <!-- 黄：Tabs -->
+        <div class="tabs">
+          <button type="button" :class="{ on: tab === 'overview' }" @click="tab = 'overview'">概览</button>
+          <button type="button" :class="{ on: tab === 'files' }" @click="tab = 'files'">
+            文件 {{ fileCount }}
           </button>
         </div>
 
-        <div class="usage">
-          <div class="usage-head">
-            <h3>被 {{ usedAgents.length }} 个智能体使用</h3>
-            <button type="button" class="btn-ghost" :disabled="busy" @click="openBind">
-              <ActionIcon name="assign" />
-              添加到智能体
-            </button>
-          </div>
-          <ul v-if="usedAgents.length" class="agent-list">
-            <li v-for="a in usedAgents" :key="a.id">
-              <button type="button" class="agent-row" @click="goAgent(a.id)">
-                <AgentAvatar :src="a.avatar" :provider="a.provider" :size="28" />
-                <span>{{ a.name }}</span>
+        <!-- 蓝左栏 + 红主区 -->
+        <div class="detail-body">
+        <aside class="detail-aside" aria-label="侧栏">
+          <template v-if="tab === 'files'">
+            <div class="file-group">
+              <div class="file-group-title">主文件</div>
+              <button
+                type="button"
+                class="file-item"
+                :class="{ on: selectedFile === 'SKILL.md' }"
+                @click="selectedFile = 'SKILL.md'"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                  />
+                </svg>
+                SKILL.md
               </button>
-            </li>
-          </ul>
-          <div v-else class="empty-box">
-            还未分配给任何智能体。打开某个智能体的 Skills 标签页进行分配，或点击「添加到智能体」。
-          </div>
-        </div>
-
-        <p class="foot-note">你可以编辑和删除该技能。改动将在智能体下次运行时生效。</p>
-      </div>
-
-      <div v-else class="files-panel">
-        <aside class="file-nav">
-          <div class="file-group">
-            <div class="file-group-title">主文件</div>
+            </div>
+            <div class="file-group">
+              <div class="file-group-title">附属文件 {{ companionCount }}</div>
+              <p class="file-empty">暂无附属文件。</p>
+            </div>
             <button
               type="button"
-              class="file-item"
-              :class="{ on: selectedFile === 'SKILL.md' }"
-              @click="selectedFile = 'SKILL.md'"
+              class="btn-new-file"
+              disabled
+              title="完整多文件目录树后续支持"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                />
-              </svg>
-              SKILL.md
+              + 新建文件
             </button>
-          </div>
-          <div class="file-group">
-            <div class="file-group-title">附属文件 {{ companionCount }}</div>
-            <p class="file-empty">暂无附属文件。</p>
-          </div>
-          <button
-            type="button"
-            class="btn-new-file"
-            disabled
-            title="完整多文件目录树后续支持"
-          >
-            + 新建文件
-          </button>
+          </template>
         </aside>
 
-        <div class="file-main">
-          <div class="file-toolbar">
-            <strong>{{ selectedFile }}</strong>
-            <div class="mode-toggle" role="tablist" aria-label="文件模式">
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="fileMode === 'preview'"
-                :class="{ on: fileMode === 'preview' }"
-                @click="setFileMode('preview')"
-              >
-                预览
-              </button>
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="fileMode === 'edit'"
-                :class="{ on: fileMode === 'edit' }"
-                @click="setFileMode('edit')"
-              >
-                编辑
-              </button>
-            </div>
-          </div>
+        <div class="detail-main">
+          <template v-if="tab === 'overview'">
+            <section class="ov-block">
+              <h3>属性</h3>
+              <p class="hint">这些字段与 SKILL.md 的 frontmatter 保持同步。</p>
+              <label>
+                名称
+                <input v-model="editName" type="text" @input="markOverviewDirty" />
+              </label>
+              <label>
+                描述
+                <textarea v-model="editDescription" rows="6" @input="markOverviewDirty" />
+                <small>
+                  {{ editDescription.length }} 个字符 · 智能体根据这段文字判断是否加载该技能。
+                </small>
+              </label>
+              <div class="tags-row">
+                <span class="tags-label">标签</span>
+                <button type="button" class="btn-ghost tags-btn" disabled title="标签功能即将支持">
+                  添加标签
+                </button>
+              </div>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn-add"
+                  :disabled="busy || !overviewDirty"
+                  @click="saveOverview"
+                >
+                  {{ busy ? '保存中…' : '保存' }}
+                </button>
+              </div>
+            </section>
 
-          <div v-if="fileMode === 'preview'" class="md-preview" v-html="previewHtml" />
-          <div v-else class="edit-pane">
-            <textarea
-              v-model="editContent"
-              class="content"
-              spellcheck="false"
-              @input="markContentDirty"
-            />
-            <div class="edit-actions">
-              <button
-                type="button"
-                class="btn-add"
-                :disabled="busy || !contentDirty"
-                @click="saveContent"
-              >
-                {{ busy ? '保存中…' : '保存 SKILL.md' }}
-              </button>
+            <section class="ov-block usage">
+              <div class="usage-head">
+                <h3>被 {{ usedAgents.length }} 个智能体使用</h3>
+                <button type="button" class="btn-ghost" :disabled="busy" @click="openBind">
+                  <ActionIcon name="assign" />
+                  添加到智能体
+                </button>
+              </div>
+              <ul v-if="usedAgents.length" class="agent-list">
+                <li v-for="a in usedAgents" :key="a.id">
+                  <button type="button" class="agent-row" @click="goAgent(a.id)">
+                    <AgentAvatar :src="a.avatar" :provider="a.provider" :size="36" />
+                    <span class="agent-text">
+                      <strong>{{ a.name }}</strong>
+                      <span v-if="agentSubtitle(a)" class="agent-sub">{{ agentSubtitle(a) }}</span>
+                    </span>
+                  </button>
+                </li>
+              </ul>
+              <div v-else class="empty-box">
+                还未分配给任何智能体。点击「添加到智能体」进行分配。
+              </div>
+            </section>
+          </template>
+
+          <template v-else>
+            <div class="file-toolbar">
+              <strong>{{ selectedFile }}</strong>
+              <div class="mode-toggle" role="tablist" aria-label="文件模式">
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="fileMode === 'preview'"
+                  :class="{ on: fileMode === 'preview' }"
+                  @click="setFileMode('preview')"
+                >
+                  预览
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="fileMode === 'edit'"
+                  :class="{ on: fileMode === 'edit' }"
+                  @click="setFileMode('edit')"
+                >
+                  编辑
+                </button>
+              </div>
             </div>
-          </div>
+
+            <div v-if="fileMode === 'preview'" class="md-preview" v-html="previewHtml" />
+            <div v-else class="edit-pane">
+              <textarea
+                v-model="editContent"
+                class="content"
+                spellcheck="false"
+                @input="markContentDirty"
+              />
+              <div class="edit-actions">
+                <button
+                  type="button"
+                  class="btn-add"
+                  :disabled="busy || !contentDirty"
+                  @click="saveContent"
+                >
+                  {{ busy ? '保存中…' : '保存 SKILL.md' }}
+                </button>
+              </div>
+            </div>
+          </template>
         </div>
+      </div>
       </div>
     </template>
     <div v-else class="muted pad">
@@ -575,16 +605,23 @@ onMounted(load)
   flex-shrink: 0;
 }
 
+.detail-shell {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+}
 .tabs {
   display: flex;
   gap: 4px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
+  background: #fff;
 }
 .tabs button {
   border: none;
   background: transparent;
-  padding: 10px 14px;
+  padding: 12px 14px;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
@@ -597,13 +634,35 @@ onMounted(load)
   border-bottom-color: #2563eb;
 }
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 18px;
+.detail-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 520px;
 }
-.panel h3 { margin: 0 0 6px; font-size: 15px; }
+.detail-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px 12px;
+  border-right: 1px solid var(--border);
+  background: #fafafa;
+  min-height: 100%;
+}
+.detail-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 520px;
+  background: #fff;
+}
+
+.ov-block {
+  padding: 20px 24px;
+}
+.ov-block + .ov-block {
+  border-top: 1px solid var(--border);
+}
+.ov-block h3 { margin: 0 0 6px; font-size: 15px; }
 .hint { margin: 0 0 14px; font-size: 12px; color: var(--muted); line-height: 1.45; }
 label {
   display: flex;
@@ -624,25 +683,19 @@ input, textarea {
   color: var(--text);
   background: #fff;
 }
-
-.files-panel {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 0;
-  min-height: 480px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.file-nav {
+.tags-row {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 14px 12px;
-  border-right: 1px solid var(--border);
-  background: #fafafa;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
 }
+.tags-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tags-btn { font-size: 12px; padding: 6px 10px; }
+
 .file-group-title {
   font-size: 11px;
   font-weight: 700;
@@ -684,12 +737,6 @@ input, textarea {
   font-size: 13px;
   color: var(--muted);
   cursor: not-allowed;
-}
-.file-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 480px;
 }
 .file-toolbar {
   display: flex;
@@ -853,7 +900,6 @@ textarea.content {
 .icon-btn.danger { color: var(--danger); }
 .icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.usage { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); }
 .usage-head {
   display: flex;
   justify-content: space-between;
@@ -862,22 +908,46 @@ textarea.content {
   margin-bottom: 12px;
 }
 .usage-head h3 { margin: 0; }
-.agent-list { list-style: none; margin: 0; padding: 0; }
-.agent-list li { border-bottom: 1px solid var(--border); }
+.agent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.agent-list li + li { border-top: 1px solid var(--border); }
 .agent-row {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: none;
   background: transparent;
-  padding: 10px 4px;
+  padding: 12px 14px;
   cursor: pointer;
   font: inherit;
   font-size: 13px;
   text-align: left;
 }
 .agent-row:hover { background: #f9fafb; }
+.agent-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.agent-text strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+.agent-sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .empty-box {
   border: 1px dashed var(--border);
   border-radius: 10px;
@@ -886,14 +956,6 @@ textarea.content {
   color: var(--muted);
   line-height: 1.5;
   text-align: center;
-}
-.foot-note {
-  margin: 18px 0 0;
-  padding: 10px 12px;
-  background: #f9fafb;
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .modal-backdrop {
@@ -942,14 +1004,16 @@ textarea.content {
 
 @media (max-width: 820px) {
   .hero { flex-direction: column; }
-  .files-panel {
+  .detail-body {
     grid-template-columns: 1fr;
     min-height: 0;
   }
-  .file-nav {
+  .detail-aside {
     border-right: none;
     border-bottom: 1px solid var(--border);
+    min-height: 0;
   }
+  .detail-aside:empty { display: none; }
   .btn-new-file { margin-top: 0; }
 }
 </style>

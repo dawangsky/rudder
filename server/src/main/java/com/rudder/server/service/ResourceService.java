@@ -665,6 +665,7 @@ public class ResourceService {
                 Map<String, Object> brief = new HashMap<>();
                 brief.put("id", String.valueOf(a.getId()));
                 brief.put("name", a.getName());
+                brief.put("description", a.getDescription() == null ? "" : a.getDescription());
                 brief.put("avatar", a.getAvatar() == null ? "" : a.getAvatar());
                 brief.put("provider", a.getProvider());
                 agentBriefs.add(brief);

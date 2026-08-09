@@ -5,6 +5,7 @@ export type SkillSourceType = 'manual' | 'url' | 'runtime'
 export type SkillAgentBrief = {
   id: string
   name: string
+  description?: string
   avatar?: string
   provider?: string
 }
