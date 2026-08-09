@@ -825,38 +825,49 @@ onUnmounted(() => {
               全选 ({{ filteredRuntimeSkills.length }})
             </label>
 
-            <ul class="rt-skills">
-              <li v-for="rs in filteredRuntimeSkills" :key="rs.id">
-                <label class="rt-skill">
-                  <input
-                    type="checkbox"
-                    :checked="selectedRuntimeSkillIds.includes(rs.id)"
-                    @change="toggleRuntimeSkill(rs.id)"
-                  />
-                  <span class="rt-skill-body">
-                    <span class="rt-skill-top">
-                      <span class="rt-skill-title">
-                        <strong>{{ rs.name }}</strong>
-                        <span class="rt-tag">{{ skillTag(rs) }}</span>
+            <!-- 列表 + 单选编辑区同属可滚动区域，底部导入按钮始终可见 -->
+            <div class="rt-scroll">
+              <ul class="rt-skills">
+                <li
+                  v-for="rs in filteredRuntimeSkills"
+                  :key="rs.id"
+                  :class="{ expanded: soleSelectedSkill?.id === rs.id }"
+                >
+                  <label class="rt-skill">
+                    <input
+                      type="checkbox"
+                      :checked="selectedRuntimeSkillIds.includes(rs.id)"
+                      @change="toggleRuntimeSkill(rs.id)"
+                    />
+                    <span class="rt-skill-body">
+                      <span class="rt-skill-top">
+                        <span class="rt-skill-title">
+                          <strong>{{ rs.name }}</strong>
+                          <span class="rt-tag">{{ skillTag(rs) }}</span>
+                        </span>
+                        <span class="rt-files">{{ rs.fileCount ?? 1 }}个文件</span>
                       </span>
-                      <span class="rt-files">{{ rs.fileCount ?? 1 }}个文件</span>
+                      <span class="rt-skill-desc">{{ rs.description || '暂无描述' }}</span>
+                      <span class="rt-skill-path">{{ skillPath(rs) }}</span>
                     </span>
-                    <span class="rt-skill-desc">{{ rs.description || '暂无描述' }}</span>
-                    <span class="rt-skill-path">{{ skillPath(rs) }}</span>
-                  </span>
-                </label>
-              </li>
-            </ul>
-
-            <div v-if="soleSelectedSkill" class="rt-import-meta">
-              <label>
-                工作区里的 skill 名称
-                <input v-model="importName" type="text" autocomplete="off" />
-              </label>
-              <label>
-                描述
-                <textarea v-model="importDescription" rows="4" />
-              </label>
+                  </label>
+                  <div
+                    v-if="soleSelectedSkill?.id === rs.id"
+                    class="rt-import-meta"
+                    @click.stop
+                    @mousedown.stop
+                  >
+                    <label>
+                      工作区里的 skill 名称
+                      <input v-model="importName" type="text" autocomplete="off" />
+                    </label>
+                    <label>
+                      描述
+                      <textarea v-model="importDescription" rows="3" />
+                    </label>
+                  </div>
+                </li>
+              </ul>
             </div>
           </template>
 
@@ -1046,6 +1057,10 @@ tr:last-child td { border-bottom: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.modal-wide .runtime-panel {
+  flex: 1;
+  min-height: 0;
 }
 .modal-head {
   display: flex;
@@ -1371,19 +1386,24 @@ tr:last-child td { border-bottom: none; }
   flex-shrink: 0;
   color: var(--text);
 }
+.rt-scroll {
+  flex: 1;
+  min-height: 140px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
 .rt-skills {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: auto;
-  flex: 1;
-  min-height: 180px;
-  max-height: min(42vh, 360px);
 }
-.rt-skills li { border-bottom: 1px solid var(--border); }
-.rt-skills li:last-child { border-bottom: none; }
+.rt-skills > li { border-bottom: 1px solid var(--border); }
+.rt-skills > li:last-child { border-bottom: none; }
+.rt-skills > li.expanded {
+  background: #f8fafc;
+}
 .rt-skill {
   display: flex;
   align-items: flex-start;
@@ -1394,6 +1414,7 @@ tr:last-child td { border-bottom: none; }
   cursor: pointer;
 }
 .rt-skill:hover { background: #f9fafb; }
+.rt-skills > li.expanded .rt-skill:hover { background: transparent; }
 .rt-skill > input { margin-top: 3px; flex-shrink: 0; }
 .rt-skill-body {
   display: flex;
@@ -1456,12 +1477,11 @@ tr:last-child td { border-bottom: none; }
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 12px;
+  margin: 0 12px 12px 34px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fafafa;
-  flex-shrink: 0;
+  background: #fff;
 }
 .rt-import-meta label {
   display: flex;
@@ -1470,6 +1490,7 @@ tr:last-child td { border-bottom: none; }
   font-size: 13px;
   font-weight: 600;
   margin: 0;
+  cursor: default;
 }
 .rt-import-meta input,
 .rt-import-meta textarea {
@@ -1482,6 +1503,13 @@ tr:last-child td { border-bottom: none; }
   color: var(--text);
   background: #fff;
   resize: vertical;
+  box-sizing: border-box;
+  width: 100%;
+}
+.rt-import-meta textarea {
+  min-height: 72px;
+  max-height: 140px;
+  overflow: auto;
 }
 .rt-footer {
   display: flex;
@@ -1492,6 +1520,7 @@ tr:last-child td { border-bottom: none; }
   padding-top: 12px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  background: #fff;
 }
 .rt-footer-hint {
   font-size: 13px;
