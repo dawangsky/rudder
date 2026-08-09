@@ -11,7 +11,8 @@ import (
 )
 
 const maxDepth = 6
-const maxFileBytes = 512 * 1024
+const maxSkillMdBytes = 512 * 1024
+const maxAssetFileBytes = 4 * 1024 * 1024
 const maxSkillDirBytes = 8 * 1024 * 1024
 const maxSkillDirFiles = 200
 
@@ -31,7 +32,8 @@ func isSkippedDirName(name string) bool {
 }
 
 // ScanLocal 扫描常见 skill 根目录下的 SKILL.md。
-// 忽略软链、点目录（含 Codex .system）、不可读、超大文件与超大目录。
+// 忽略软链、点目录（含 Codex .system）、不可读、超大 SKILL.md 与超大目录。
+// 附属文件单文件过大时跳过该文件，不整包丢弃。
 func ScanLocal() []Skill {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -110,7 +112,7 @@ func readSkill(path string) (Skill, bool) {
 	if err != nil || st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() {
 		return Skill{}, false
 	}
-	if st.Size() <= 0 || st.Size() > maxFileBytes {
+	if st.Size() <= 0 || st.Size() > maxSkillMdBytes {
 		return Skill{}, false
 	}
 	if !measureSkillDirOK(filepath.Dir(path)) {
@@ -169,8 +171,9 @@ func measureSkillDirOK(dir string) bool {
 		if infoErr != nil || !info.Mode().IsRegular() {
 			return nil
 		}
-		if info.Size() > maxFileBytes {
-			return fs.SkipAll
+		// 附属大文件跳过计入，不否决整个 skill
+		if info.Size() > maxAssetFileBytes {
+			return nil
 		}
 		files++
 		bytes += info.Size()

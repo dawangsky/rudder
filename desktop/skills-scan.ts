@@ -1,7 +1,8 @@
 /**
  * 扫描本机常见 skill 根目录下的 SKILL.md（与 daemon/internal/skills/scan.go 对齐）。
  *
- * 忽略：软链、点目录（含 Codex `.system`）、不可读、超大文件、超大目录。
+ * 忽略：软链、点目录（含 Codex `.system`）、不可读、超大 SKILL.md、超大目录。
+ * 附属文件（references 等）单文件过大时跳过该文件计入，不整包丢弃。
  */
 import crypto from 'crypto'
 import fs from 'fs'
@@ -9,9 +10,11 @@ import os from 'os'
 import path from 'path'
 
 const MAX_DEPTH = 6
-/** 单份 SKILL.md 上限 */
-const MAX_FILE_BYTES = 512 * 1024
-/** 单个 skill 目录体积上限（递归、不含软链） */
+/** 导入用的 SKILL.md 正文上限 */
+const MAX_SKILL_MD_BYTES = 512 * 1024
+/** 附属文件单文件上限：超过则跳过该文件，不否决整个 skill */
+const MAX_ASSET_FILE_BYTES = 4 * 1024 * 1024
+/** 单个 skill 目录体积上限（递归、不含软链与超限附属文件） */
 const MAX_SKILL_DIR_BYTES = 8 * 1024 * 1024
 /** 单个 skill 目录文件数上限 */
 const MAX_SKILL_DIR_FILES = 200
@@ -111,7 +114,8 @@ function measureSkillDir(dir: string): { fileCount: number; bytes: number } | nu
         continue
       }
       if (st.isSymbolicLink() || !st.isFile()) continue
-      if (st.size > MAX_FILE_BYTES) return false
+      // 附属大文件（如 iconpark-index.json）跳过计入，不整包失败
+      if (st.size > MAX_ASSET_FILE_BYTES) continue
       fileCount += 1
       bytes += st.size
       if (fileCount > MAX_SKILL_DIR_FILES || bytes > MAX_SKILL_DIR_BYTES) return false
@@ -129,7 +133,7 @@ function readSkill(skillMdPath: string, origin: string, home: string): LocalSkil
   } catch {
     return null
   }
-  if (st.isSymbolicLink() || !st.isFile() || st.size <= 0 || st.size > MAX_FILE_BYTES) {
+  if (st.isSymbolicLink() || !st.isFile() || st.size <= 0 || st.size > MAX_SKILL_MD_BYTES) {
     return null
   }
   let content: string
