@@ -72,15 +72,35 @@ public class ApiControllers {
     @GetMapping("/skills")
     public List<Map<String, Object>> skills() { return resourceService.listSkills(session()); }
 
+    @GetMapping("/skills/{id}")
+    public Map<String, Object> skill(@PathVariable Long id) {
+        return resourceService.getSkill(session(), id);
+    }
+
     @PostMapping("/skills")
     public Map<String, Object> createSkill(@RequestBody Map<String, Object> body) {
         return resourceService.createSkill(session(), body);
+    }
+
+    @PatchMapping("/skills/{id}")
+    public Map<String, Object> updateSkill(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return resourceService.updateSkill(session(), id, body);
     }
 
     @DeleteMapping("/skills/{id}")
     public Map<String, Object> deleteSkill(@PathVariable Long id) {
         resourceService.deleteSkill(session(), id);
         return Map.of("ok", true);
+    }
+
+    @PostMapping("/skills/delete-batch")
+    public Map<String, Object> deleteSkills(@RequestBody Map<String, Object> body) {
+        return resourceService.deleteSkills(session(), body);
+    }
+
+    @PostMapping("/skills/bind-agents")
+    public Map<String, Object> bindSkillsToAgents(@RequestBody Map<String, Object> body) {
+        return resourceService.bindSkillsToAgents(session(), body);
     }
 
     @PostMapping("/skills/import-url")

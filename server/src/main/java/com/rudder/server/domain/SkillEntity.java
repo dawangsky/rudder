@@ -36,6 +36,9 @@ public class SkillEntity {
     @TableField("source_ref")
     private String sourceRef;
 
+    @TableField("created_by_user_id")
+    private Long createdByUserId;
+
     @TableField("created_at")
     private LocalDateTime createdAt;
 

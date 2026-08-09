@@ -13,6 +13,7 @@ import com.rudder.server.domain.RuntimeEntity;
 import com.rudder.server.domain.RuntimeSkillEntity;
 import com.rudder.server.domain.SkillEntity;
 import com.rudder.server.domain.TaskEntity;
+import com.rudder.server.domain.UserEntity;
 import com.rudder.server.mapper.AgentMapper;
 import com.rudder.server.mapper.AgentSkillMapper;
 import com.rudder.server.mapper.ChatMessageMapper;
@@ -24,6 +25,7 @@ import com.rudder.server.mapper.RuntimeMapper;
 import com.rudder.server.mapper.RuntimeSkillMapper;
 import com.rudder.server.mapper.SkillMapper;
 import com.rudder.server.mapper.TaskMapper;
+import com.rudder.server.mapper.UserMapper;
 import com.rudder.server.ws.NettyWsHub;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,7 @@ public class ResourceService {
     private final ChatMessageMapper chatMessageMapper;
     private final IssueMapper issueMapper;
     private final InboxMapper inboxMapper;
+    private final UserMapper userMapper;
     private final NettyWsHub wsHub;
     private final SkillImportService skillImportService;
 
@@ -294,12 +297,23 @@ public class ResourceService {
 
     // -------- Skill --------
     public List<Map<String, Object>> listSkills(AuthPrincipal p) {
-        return skillMapper.selectList(new LambdaQueryWrapper<SkillEntity>()
-                        .eq(SkillEntity::getWorkspaceId, p.workspaceId())
-                        .orderByDesc(SkillEntity::getId))
-                .stream().map(this::skillView).collect(Collectors.toList());
+        List<SkillEntity> skills = skillMapper.selectList(new LambdaQueryWrapper<SkillEntity>()
+                .eq(SkillEntity::getWorkspaceId, p.workspaceId())
+                .orderByDesc(SkillEntity::getUpdatedAt)
+                .orderByDesc(SkillEntity::getId));
+        return enrichSkillViews(p, skills, false);
     }
 
+    public Map<String, Object> getSkill(AuthPrincipal p, Long id) {
+        SkillEntity s = requireSkill(p, id);
+        List<Map<String, Object>> views = enrichSkillViews(p, List.of(s), true);
+        return views.isEmpty() ? skillView(s) : views.get(0);
+    }
+
+    /**
+     * 创建或同名更新。返回字段含 action=created|updated。
+     */
+    @Transactional
     public Map<String, Object> createSkill(AuthPrincipal p, Map<String, Object> body) {
         String content = require(body.get("content"), "内容不能为空");
         SkillMarkdown.Parsed parsed = SkillMarkdown.parse(content);
@@ -312,17 +326,81 @@ public class ResourceService {
         if (!StringUtils.hasText(description)) description = parsed.description();
         String sourceType = str(body.get("sourceType"));
         if (!StringUtils.hasText(sourceType)) sourceType = "manual";
+        String sourceRef = StringUtils.hasText(str(body.get("sourceRef"))) ? str(body.get("sourceRef")) : null;
+
+        SkillEntity existing = skillMapper.selectOne(new LambdaQueryWrapper<SkillEntity>()
+                .eq(SkillEntity::getWorkspaceId, p.workspaceId())
+                .eq(SkillEntity::getName, name)
+                .last("LIMIT 1"));
+        LocalDateTime now = LocalDateTime.now();
+        if (existing != null) {
+            existing.setDescription(StringUtils.hasText(description) ? description : null);
+            existing.setContent(content);
+            existing.setSourceType(sourceType);
+            existing.setSourceRef(sourceRef);
+            existing.setUpdatedAt(now);
+            skillMapper.updateById(existing);
+            Map<String, Object> view = getSkill(p, existing.getId());
+            view.put("action", "updated");
+            return view;
+        }
+
         SkillEntity s = new SkillEntity();
         s.setWorkspaceId(p.workspaceId());
         s.setName(name);
         s.setDescription(StringUtils.hasText(description) ? description : null);
         s.setContent(content);
         s.setSourceType(sourceType);
-        s.setSourceRef(StringUtils.hasText(str(body.get("sourceRef"))) ? str(body.get("sourceRef")) : null);
-        s.setCreatedAt(LocalDateTime.now());
-        s.setUpdatedAt(LocalDateTime.now());
+        s.setSourceRef(sourceRef);
+        s.setCreatedByUserId(p.userId());
+        s.setCreatedAt(now);
+        s.setUpdatedAt(now);
         skillMapper.insert(s);
-        return skillView(s);
+        Map<String, Object> view = getSkill(p, s.getId());
+        view.put("action", "created");
+        return view;
+    }
+
+    @Transactional
+    public Map<String, Object> updateSkill(AuthPrincipal p, Long id, Map<String, Object> body) {
+        SkillEntity s = requireSkill(p, id);
+        boolean touched = false;
+        if (body.containsKey("name")) {
+            String name = str(body.get("name")).trim();
+            if (!StringUtils.hasText(name)) throw new IllegalArgumentException("名称不能为空");
+            SkillEntity clash = skillMapper.selectOne(new LambdaQueryWrapper<SkillEntity>()
+                    .eq(SkillEntity::getWorkspaceId, p.workspaceId())
+                    .eq(SkillEntity::getName, name)
+                    .ne(SkillEntity::getId, id)
+                    .last("LIMIT 1"));
+            if (clash != null) throw new IllegalArgumentException("同名 skill 已存在");
+            s.setName(name);
+            touched = true;
+        }
+        if (body.containsKey("description")) {
+            String description = str(body.get("description"));
+            s.setDescription(StringUtils.hasText(description) ? description : null);
+            touched = true;
+        }
+        if (body.containsKey("content")) {
+            String content = require(body.get("content"), "内容不能为空");
+            s.setContent(content);
+            SkillMarkdown.Parsed parsed = SkillMarkdown.parse(content);
+            if (!body.containsKey("name") && StringUtils.hasText(parsed.name())) {
+                s.setName(parsed.name());
+            }
+            if (!body.containsKey("description") && StringUtils.hasText(parsed.description())) {
+                s.setDescription(parsed.description());
+            }
+            touched = true;
+        } else if (touched) {
+            s.setContent(SkillMarkdown.syncFrontmatter(s.getContent(), s.getName(),
+                    s.getDescription() == null ? "" : s.getDescription()));
+        }
+        if (!touched) throw new IllegalArgumentException("没有可更新的字段");
+        s.setUpdatedAt(LocalDateTime.now());
+        skillMapper.updateById(s);
+        return getSkill(p, s.getId());
     }
 
     public Map<String, Object> importSkillFromUrl(AuthPrincipal p, Map<String, Object> body) {
@@ -352,6 +430,65 @@ public class ResourceService {
         SkillEntity s = requireSkill(p, id);
         agentSkillMapper.delete(new LambdaQueryWrapper<AgentSkillEntity>().eq(AgentSkillEntity::getSkillId, id));
         skillMapper.deleteById(s.getId());
+    }
+
+    @Transactional
+    public Map<String, Object> deleteSkills(AuthPrincipal p, Map<String, Object> body) {
+        List<Long> ids = asLongList(body.get("skillIds"));
+        int n = 0;
+        for (Long id : ids) {
+            try {
+                deleteSkill(p, id);
+                n++;
+            } catch (IllegalArgumentException ignored) {
+                // skip missing
+            }
+        }
+        return Map.of("ok", true, "deleted", n);
+    }
+
+    /** 将多个 skill 挂到多个 agent（已存在绑定则跳过）。 */
+    @Transactional
+    public Map<String, Object> bindSkillsToAgents(AuthPrincipal p, Map<String, Object> body) {
+        List<Long> skillIds = asLongList(body.get("skillIds"));
+        List<Long> agentIds = asLongList(body.get("agentIds"));
+        if (skillIds.isEmpty() || agentIds.isEmpty()) {
+            throw new IllegalArgumentException("skillIds 与 agentIds 不能为空");
+        }
+        Set<Long> validSkillIds = new HashSet<>();
+        for (Long sid : skillIds) {
+            SkillEntity s = skillMapper.selectById(sid);
+            if (s != null && Objects.equals(s.getWorkspaceId(), p.workspaceId())) {
+                validSkillIds.add(sid);
+            }
+        }
+        Set<Long> validAgentIds = new HashSet<>();
+        for (Long aid : agentIds) {
+            AgentEntity a = agentMapper.selectById(aid);
+            if (a != null && Objects.equals(a.getWorkspaceId(), p.workspaceId())) {
+                validAgentIds.add(aid);
+            }
+        }
+        if (validSkillIds.isEmpty() || validAgentIds.isEmpty()) {
+            throw new IllegalArgumentException("无效的 skill 或智能体");
+        }
+        int linked = 0;
+        LocalDateTime now = LocalDateTime.now();
+        for (Long aid : validAgentIds) {
+            Set<Long> existing = agentSkillMapper.selectList(new LambdaQueryWrapper<AgentSkillEntity>()
+                            .eq(AgentSkillEntity::getAgentId, aid))
+                    .stream().map(AgentSkillEntity::getSkillId).collect(Collectors.toSet());
+            for (Long sid : validSkillIds) {
+                if (existing.contains(sid)) continue;
+                AgentSkillEntity rel = new AgentSkillEntity();
+                rel.setAgentId(aid);
+                rel.setSkillId(sid);
+                rel.setCreatedAt(now);
+                agentSkillMapper.insert(rel);
+                linked++;
+            }
+        }
+        return Map.of("ok", true, "linked", linked);
     }
 
     public List<Map<String, Object>> listRuntimeSkills(AuthPrincipal p, Long runtimeId) {
@@ -474,9 +611,79 @@ public class ResourceService {
         m.put("content", s.getContent());
         m.put("sourceType", s.getSourceType() == null ? "manual" : s.getSourceType());
         m.put("sourceRef", s.getSourceRef() == null ? "" : s.getSourceRef());
+        m.put("createdByUserId", s.getCreatedByUserId() == null ? null : String.valueOf(s.getCreatedByUserId()));
+        m.put("createdBy", "");
+        m.put("agentCount", 0);
+        m.put("agents", List.of());
         m.put("createdAt", s.getCreatedAt() == null ? null : s.getCreatedAt().toString());
         m.put("updatedAt", s.getUpdatedAt() == null ? null : s.getUpdatedAt().toString());
         return m;
+    }
+
+    private List<Map<String, Object>> enrichSkillViews(AuthPrincipal p, List<SkillEntity> skills, boolean withContent) {
+        if (skills == null || skills.isEmpty()) return List.of();
+        List<Long> skillIds = skills.stream().map(SkillEntity::getId).toList();
+        List<AgentSkillEntity> links = agentSkillMapper.selectList(new LambdaQueryWrapper<AgentSkillEntity>()
+                .in(AgentSkillEntity::getSkillId, skillIds));
+        Map<Long, List<Long>> skillToAgents = new HashMap<>();
+        Set<Long> agentIdSet = new HashSet<>();
+        for (AgentSkillEntity link : links) {
+            skillToAgents.computeIfAbsent(link.getSkillId(), k -> new ArrayList<>()).add(link.getAgentId());
+            agentIdSet.add(link.getAgentId());
+        }
+        Map<Long, AgentEntity> agents = agentIdSet.isEmpty()
+                ? Map.of()
+                : agentMapper.selectBatchIds(agentIdSet).stream()
+                        .filter(a -> Objects.equals(a.getWorkspaceId(), p.workspaceId()))
+                        .collect(Collectors.toMap(AgentEntity::getId, a -> a, (a, b) -> a));
+        Set<Long> userIds = skills.stream()
+                .map(SkillEntity::getCreatedByUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, UserEntity> users = userIds.isEmpty()
+                ? Map.of()
+                : userMapper.selectBatchIds(userIds).stream()
+                        .collect(Collectors.toMap(UserEntity::getId, u -> u, (a, b) -> a));
+
+        List<Map<String, Object>> out = new ArrayList<>(skills.size());
+        for (SkillEntity s : skills) {
+            Map<String, Object> m = skillView(s);
+            if (!withContent) {
+                m.put("content", "");
+            }
+            UserEntity creator = s.getCreatedByUserId() == null ? null : users.get(s.getCreatedByUserId());
+            if (creator != null) {
+                m.put("createdBy", StringUtils.hasText(creator.getDisplayName())
+                        ? creator.getDisplayName()
+                        : creator.getEmail());
+            }
+            List<Long> aids = skillToAgents.getOrDefault(s.getId(), List.of());
+            List<Map<String, Object>> agentBriefs = new ArrayList<>();
+            for (Long aid : aids) {
+                AgentEntity a = agents.get(aid);
+                if (a == null) continue;
+                Map<String, Object> brief = new HashMap<>();
+                brief.put("id", String.valueOf(a.getId()));
+                brief.put("name", a.getName());
+                brief.put("avatar", a.getAvatar() == null ? "" : a.getAvatar());
+                brief.put("provider", a.getProvider());
+                agentBriefs.add(brief);
+            }
+            m.put("agentCount", agentBriefs.size());
+            m.put("agents", agentBriefs);
+            out.add(m);
+        }
+        return out;
+    }
+
+    private static List<Long> asLongList(Object raw) {
+        List<Long> out = new ArrayList<>();
+        if (!(raw instanceof List<?> list)) return out;
+        for (Object o : list) {
+            Long id = asLong(o);
+            if (id != null) out.add(id);
+        }
+        return out;
     }
 
     private Map<String, Object> runtimeSkillView(RuntimeSkillEntity s) {

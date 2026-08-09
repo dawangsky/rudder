@@ -56,14 +56,16 @@ CREATE TABLE IF NOT EXISTS rb_skill (
     id           BIGINT PRIMARY KEY,
     workspace_id BIGINT NOT NULL,
     name         VARCHAR(128) NOT NULL,
-    description  VARCHAR(512) NULL COMMENT '简介（可从 frontmatter 解析）',
+    description  VARCHAR(2048) NULL COMMENT '简介（可从 frontmatter 解析）',
     content      MEDIUMTEXT NOT NULL,
     source_type  VARCHAR(32) NOT NULL DEFAULT 'manual' COMMENT 'manual|url|runtime',
     source_ref   VARCHAR(512) NULL COMMENT '来源 URL 或运行时路径',
+    created_by_user_id BIGINT NULL COMMENT '创建者用户 id',
     created_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     deleted      TINYINT NOT NULL DEFAULT 0,
-    KEY idx_skill_ws (workspace_id)
+    KEY idx_skill_ws (workspace_id),
+    KEY idx_skill_creator (created_by_user_id)
 ) COMMENT='工作区 Skill（任意智能体可挂载）';
 
 CREATE TABLE IF NOT EXISTS rb_agent_skill (

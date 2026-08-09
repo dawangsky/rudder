@@ -28,10 +28,77 @@ public final class SkillMarkdown {
             return new Parsed("", "", raw);
         }
         Map<String, String> meta = parseYamlSimple(m.group(1));
-        String body = raw.substring(m.end()).trim();
         String name = meta.getOrDefault("name", "").trim();
         String desc = meta.getOrDefault("description", "").trim();
         return new Parsed(name, desc, raw);
+    }
+
+    /**
+     * 同步 frontmatter 中的 name / description；无 frontmatter 时在文首补一段。
+     */
+    public static String syncFrontmatter(String content, String name, String description) {
+        String raw = content == null ? "" : content;
+        String safeName = name == null ? "" : name.trim();
+        String safeDesc = description == null ? "" : description.trim();
+        Matcher m = FRONTMATTER.matcher(raw.stripLeading());
+        if (!m.find()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("---\n");
+            sb.append("name: ").append(yamlScalar(safeName)).append('\n');
+            if (StringUtils.hasText(safeDesc)) {
+                sb.append("description: ").append(yamlBlockOrScalar(safeDesc)).append('\n');
+            }
+            sb.append("---\n\n");
+            sb.append(raw.stripLeading());
+            return sb.toString();
+        }
+        String yaml = m.group(1);
+        String body = raw.stripLeading().substring(m.end());
+        Map<String, String> meta = parseYamlSimple(yaml);
+        meta.put("name", safeName);
+        if (StringUtils.hasText(safeDesc)) {
+            meta.put("description", safeDesc);
+        } else {
+            meta.remove("description");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("---\n");
+        // 保持常见顺序：name → description → 其他
+        if (meta.containsKey("name")) {
+            sb.append("name: ").append(yamlScalar(meta.get("name"))).append('\n');
+        }
+        if (meta.containsKey("description")) {
+            sb.append("description: ").append(yamlBlockOrScalar(meta.get("description"))).append('\n');
+        }
+        for (Map.Entry<String, String> e : meta.entrySet()) {
+            if ("name".equals(e.getKey()) || "description".equals(e.getKey())) continue;
+            sb.append(e.getKey()).append(": ").append(yamlScalar(e.getValue())).append('\n');
+        }
+        sb.append("---\n");
+        if (!body.isEmpty() && !body.startsWith("\n")) sb.append('\n');
+        sb.append(body);
+        return sb.toString();
+    }
+
+    private static String yamlScalar(String v) {
+        if (v == null) return "\"\"";
+        if (v.isEmpty()) return "\"\"";
+        if (v.indexOf(':') >= 0 || v.indexOf('#') >= 0 || v.indexOf('\n') >= 0
+                || v.startsWith(" ") || v.endsWith(" ")) {
+            return "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        }
+        return v;
+    }
+
+    private static String yamlBlockOrScalar(String v) {
+        if (v != null && v.contains("\n")) {
+            StringBuilder sb = new StringBuilder("|-\n");
+            for (String line : v.split("\\r?\\n", -1)) {
+                sb.append("  ").append(line).append('\n');
+            }
+            return sb.toString().stripTrailing();
+        }
+        return yamlScalar(v);
     }
 
     /** 极简 YAML：只取顶层 key: value / key: | 多行首行。 */
