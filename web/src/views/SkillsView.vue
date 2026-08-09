@@ -2,7 +2,7 @@
 /**
  * Skills：工作区共享指令；支持手动创建 / URL 导入 / 从运行时复制。
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { apiFetch } from '@/lib/api'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import MoreMenu from '@/components/MoreMenu.vue'
@@ -97,10 +97,14 @@ const soleSelectedSkill = computed(() => {
   return runtimeSkills.value.find((s) => s.id === id) || null
 })
 
-watch(soleSelectedSkill, (sk) => {
+watch(soleSelectedSkill, async (sk) => {
   if (sk) {
     importName.value = sk.name
     importDescription.value = sk.description || ''
+    await nextTick()
+    document
+      .querySelector('.rt-skills > li.expanded')
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   } else {
     importName.value = ''
     importDescription.value = ''
