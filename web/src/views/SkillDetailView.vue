@@ -16,6 +16,7 @@ import {
   sourceLabel,
   type Skill,
 } from '@/lib/skills'
+import { displayName, type Runtime } from '@/lib/runtimes'
 import type { Agent } from '@/lib/agents'
 
 type Tab = 'overview' | 'files'
@@ -26,6 +27,7 @@ const router = useRouter()
 
 const skill = ref<Skill | null>(null)
 const agents = ref<Agent[]>([])
+const runtimes = ref<Runtime[]>([])
 const loading = ref(false)
 const busy = ref(false)
 const err = ref('')
@@ -77,10 +79,31 @@ const originLabel = computed(() => {
   }
 })
 
+const matchedRuntime = computed(() => {
+  const s = skill.value
+  if (!s || s.sourceType !== 'runtime') return null
+  const origin = skillOriginFromPath(s.sourceRef)
+  const list = runtimes.value
+  const byOrigin = list.find((r) => {
+    const p = (r.provider || '').toLowerCase()
+    const n = displayName(r).toLowerCase()
+    return p.includes(origin) || n.includes(origin)
+  })
+  if (byOrigin) return byOrigin
+  return list.find((r) => r.status === 'online') || list[0] || null
+})
+
 const sourceHint = computed(() => {
   const s = skill.value
   if (!s) return ''
   if (s.sourceType === 'runtime') {
+    const rt = matchedRuntime.value
+    if (rt) {
+      const host = (rt.hostName || '').trim()
+      return host
+        ? `本地运行时 · ${displayName(rt)} (${host})`
+        : `本地运行时 · ${displayName(rt)}`
+    }
     return `本地运行时 · ${originLabel.value}`
   }
   if (s.sourceType === 'url' && s.sourceRef) return `URL · ${s.sourceRef}`
@@ -94,12 +117,14 @@ async function load() {
   loading.value = true
   err.value = ''
   try {
-    const [s, a] = await Promise.all([
+    const [s, a, rt] = await Promise.all([
       apiFetch<Skill>(`/api/skills/${skillId.value}`),
       apiFetch<Agent[]>('/api/agents'),
+      apiFetch<Runtime[]>('/api/runtimes'),
     ])
     skill.value = s
     agents.value = a.filter((x) => (x.status || '').toLowerCase() !== 'archived')
+    runtimes.value = rt
     editName.value = s.name
     editDescription.value = s.description || ''
     editContent.value = s.content || ''
@@ -243,71 +268,24 @@ onMounted(load)
   <section class="page">
     <div v-if="loading" class="muted pad">加载中…</div>
     <template v-else-if="skill">
-      <nav class="crumbs">
-        <router-link :to="{ name: 'skills' }">Skills</router-link>
-        <span class="sep">›</span>
-        <span>{{ skill.name }}</span>
-      </nav>
-
-      <header class="hero">
-        <div class="hero-left">
-          <span class="skill-ico" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M8 4h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"
-                stroke="currentColor"
-                stroke-width="1.5"
-              />
-              <path d="M9 9h6M9 13h6M9 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
-          </span>
-          <div class="hero-text">
-            <h1>{{ skill.name }}</h1>
-            <div class="meta">
-              <span class="meta-item" :title="formatSkillDisplayPath(skill.sourceRef) || sourceHint">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5" />
-                  <path d="M7 15h4M13 15h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
-                {{ sourceHint }}
-              </span>
-              <span class="meta-item">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                  <path d="M14 4v4h4" stroke="currentColor" stroke-width="1.5" />
-                </svg>
-                {{ fileCount }} 个文件
-              </span>
-              <span class="meta-item">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.5" />
-                  <circle cx="16" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5" />
-                  <path
-                    d="M3.5 19c1.2-2.6 3.4-4 5.5-4s4.3 1.4 5.5 4M14 15c1.5 0 3 .8 4 2.5"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                  />
-                </svg>
-                {{ skill.agentCount || 0 }} 个智能体在使用
-              </span>
-              <span class="meta-item">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" />
-                  <path d="M12 8v4.5L15 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
-                {{ skill.createdBy || '未知' }} 于 {{ formatSkillTime(skill.updatedAt || skill.createdAt) }}更新
-              </span>
-            </div>
-          </div>
-        </div>
-        <div class="hero-actions">
+      <div class="top-bar">
+        <nav class="crumbs">
+          <router-link :to="{ name: 'skills' }">Skills</router-link>
+          <span class="sep">›</span>
+          <span>{{ skill.name }}</span>
+        </nav>
+        <div class="top-actions">
           <button type="button" class="btn-add" :disabled="busy" @click="openBind">
-            <ActionIcon name="assign" />
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6" />
+              <path
+                d="M3.8 18.5c1.2-2.4 3.2-3.6 5.2-3.6s4 1.2 5.2 3.6"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              />
+              <path d="M18 8v6M15 11h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
             添加到智能体
           </button>
           <button
@@ -320,6 +298,62 @@ onMounted(load)
           >
             <ActionIcon name="delete" />
           </button>
+        </div>
+      </div>
+
+      <header class="hero">
+        <div class="hero-identity">
+          <span class="skill-ico" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M8 4h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <path d="M9 9h6M9 13h6M9 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </span>
+          <h1>{{ skill.name }}</h1>
+        </div>
+        <div class="meta">
+          <span class="meta-pill" :title="formatSkillDisplayPath(skill.sourceRef) || sourceHint">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5" />
+              <path d="M7 15h4M13 15h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            {{ sourceHint }}
+          </span>
+          <span class="meta-pill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <path d="M14 4v4h4" stroke="currentColor" stroke-width="1.5" />
+            </svg>
+            {{ fileCount }} 个文件
+          </span>
+          <span class="meta-pill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.5" />
+              <circle cx="16" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5" />
+              <path
+                d="M3.5 19c1.2-2.6 3.4-4 5.5-4s4.3 1.4 5.5 4M14 15c1.5 0 3 .8 4 2.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+            {{ skill.agentCount || 0 }} 个智能体在用
+          </span>
+          <span class="meta-pill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" />
+              <path d="M12 8v4.5L15 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            {{ skill.createdBy || '未知' }} 于 {{ formatSkillTime(skill.updatedAt || skill.createdAt) }}更新
+          </span>
         </div>
       </header>
 
@@ -337,29 +371,31 @@ onMounted(load)
 
         <!-- 蓝左栏 + 红主区 -->
         <div class="detail-body">
-        <aside class="detail-aside" aria-label="侧栏">
+        <aside class="detail-aside" :class="{ files: tab === 'files' }" aria-label="侧栏">
           <template v-if="tab === 'files'">
-            <div class="file-group">
-              <div class="file-group-title">主文件</div>
-              <button
-                type="button"
-                class="file-item"
-                :class="{ on: selectedFile === 'SKILL.md' }"
-                @click="selectedFile = 'SKILL.md'"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                  />
-                </svg>
-                SKILL.md
-              </button>
-            </div>
-            <div class="file-group">
-              <div class="file-group-title">附属文件 {{ companionCount }}</div>
-              <p class="file-empty">暂无附属文件。</p>
+            <div class="aside-scroll">
+              <div class="file-group">
+                <div class="file-group-title">主文件</div>
+                <button
+                  type="button"
+                  class="file-item"
+                  :class="{ on: selectedFile === 'SKILL.md' }"
+                  @click="selectedFile = 'SKILL.md'"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    />
+                  </svg>
+                  SKILL.md
+                </button>
+              </div>
+              <div class="file-group">
+                <div class="file-group-title">附属文件 {{ companionCount }}</div>
+                <p class="file-empty">暂无附属文件。</p>
+              </div>
             </div>
             <button
               type="button"
@@ -540,28 +576,42 @@ onMounted(load)
 .error { color: var(--danger); font-size: 13px; margin: 0 0 12px; }
 .ok { color: #15803d; font-size: 13px; margin: 0 0 12px; }
 
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
 .crumbs {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: var(--muted);
-  margin-bottom: 16px;
+  min-width: 0;
 }
 .crumbs a { color: #2563eb; text-decoration: none; }
 .sep { color: #d1d5db; }
+.top-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
 
 .hero {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
+  gap: 16px 20px;
   margin-bottom: 18px;
+  flex-wrap: wrap;
 }
-.hero-left {
+.hero-identity {
   display: flex;
+  align-items: center;
   gap: 12px;
-  align-items: flex-start;
   min-width: 0;
 }
 .skill-ico {
@@ -575,8 +625,7 @@ onMounted(load)
   color: #4b5563;
   flex-shrink: 0;
 }
-.hero-text { min-width: 0; }
-.hero-text h1 {
+.hero-identity h1 {
   margin: 0;
   font-size: 24px;
   font-weight: 700;
@@ -586,24 +635,25 @@ onMounted(load)
 .meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 16px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
 }
-.meta-item {
+.meta-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
 }
-.meta-item svg { flex-shrink: 0; }
-.hero-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-shrink: 0;
-}
+.meta-pill svg { flex-shrink: 0; color: #6b7280; }
 
 .detail-shell {
   border: 1px solid var(--border);
@@ -631,22 +681,34 @@ onMounted(load)
 }
 .tabs button.on {
   color: var(--text);
-  border-bottom-color: #2563eb;
+  border-bottom-color: var(--text);
 }
 
 .detail-body {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 520px;
+  align-items: stretch;
 }
 .detail-aside {
   display: flex;
   flex-direction: column;
-  gap: 16px;
   padding: 14px 12px;
   border-right: 1px solid var(--border);
   background: #fafafa;
   min-height: 100%;
+}
+.detail-aside.files {
+  padding-bottom: 12px;
+}
+.aside-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 12px;
 }
 .detail-main {
   display: flex;
@@ -730,12 +792,15 @@ input, textarea {
 }
 .btn-new-file {
   margin-top: auto;
-  border: 1px dashed var(--border);
+  flex-shrink: 0;
+  width: 100%;
+  border: 1px solid var(--border);
   background: #fff;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 9px 10px;
   font-size: 13px;
-  color: var(--muted);
+  font-weight: 500;
+  color: #6b7280;
   cursor: not-allowed;
 }
 .file-toolbar {
@@ -1003,7 +1068,9 @@ textarea.content {
 }
 
 @media (max-width: 820px) {
-  .hero { flex-direction: column; }
+  .top-bar { align-items: flex-start; }
+  .hero { align-items: flex-start; }
+  .meta { justify-content: flex-start; margin-left: 0; }
   .detail-body {
     grid-template-columns: 1fr;
     min-height: 0;
@@ -1011,9 +1078,9 @@ textarea.content {
   .detail-aside {
     border-right: none;
     border-bottom: 1px solid var(--border);
-    min-height: 0;
+    min-height: 220px;
   }
-  .detail-aside:empty { display: none; }
-  .btn-new-file { margin-top: 0; }
+  .detail-aside:not(.files) { display: none; }
+  .btn-new-file { margin-top: 8px; }
 }
 </style>
