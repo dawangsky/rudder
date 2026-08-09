@@ -11,11 +11,11 @@ import path from 'path'
 
 const MAX_DEPTH = 6
 /** 导入用的 SKILL.md 正文上限 */
-const MAX_SKILL_MD_BYTES = 512 * 1024
+const MAX_SKILL_MD_BYTES = 1024 * 1024
 /** 附属文件单文件上限：超过则跳过该文件，不否决整个 skill */
 const MAX_ASSET_FILE_BYTES = 4 * 1024 * 1024
 /** 单个 skill 目录体积上限（递归、不含软链与超限附属文件） */
-const MAX_SKILL_DIR_BYTES = 8 * 1024 * 1024
+const MAX_SKILL_DIR_BYTES = 16 * 1024 * 1024
 /** 单个 skill 目录文件数上限 */
 const MAX_SKILL_DIR_FILES = 200
 

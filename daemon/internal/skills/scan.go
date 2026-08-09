@@ -11,9 +11,9 @@ import (
 )
 
 const maxDepth = 6
-const maxSkillMdBytes = 512 * 1024
+const maxSkillMdBytes = 1024 * 1024
 const maxAssetFileBytes = 4 * 1024 * 1024
-const maxSkillDirBytes = 8 * 1024 * 1024
+const maxSkillDirBytes = 16 * 1024 * 1024
 const maxSkillDirFiles = 200
 
 var frontmatterRe = regexp.MustCompile(`(?s)^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?`)
