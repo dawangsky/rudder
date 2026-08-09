@@ -6,6 +6,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '@/lib/api'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import MoreMenu from '@/components/MoreMenu.vue'
 import ActionIcon from '@/components/ActionIcon.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import { renderMarkdown } from '@/lib/markdown'
@@ -50,6 +51,9 @@ const filesDirty = ref(false)
 const creatingFile = ref(false)
 const newFilePath = ref('')
 const pendingDeleteFile = ref('')
+const fileMenuOpenId = ref('')
+const renamingPath = ref('')
+const renameDraft = ref('')
 
 const pendingDelete = ref(false)
 const showBind = ref(false)
@@ -202,14 +206,70 @@ function markFilesDirty() {
   okMsg.value = ''
 }
 
-function selectFile(path: string) {
+function selectFile(path: string, mode?: FileMode) {
   selectedFile.value = path
   creatingFile.value = false
-  if (path === 'SKILL.md') {
-    fileMode.value = contentDirty.value ? 'edit' : 'preview'
-  } else {
-    fileMode.value = 'edit'
+  renamingPath.value = ''
+  fileMenuOpenId.value = ''
+  if (mode) {
+    fileMode.value = mode
+    return
   }
+  const dirtyMain = path === 'SKILL.md' && contentDirty.value
+  fileMode.value = dirtyMain ? 'edit' : 'preview'
+}
+
+function setFileMenuOpen(id: string, open: boolean) {
+  fileMenuOpenId.value = open ? id : fileMenuOpenId.value === id ? '' : fileMenuOpenId.value
+}
+
+function editFileFromMenu(path: string) {
+  selectFile(path, 'edit')
+}
+
+function startRename(path: string) {
+  if (path === 'SKILL.md') return
+  fileMenuOpenId.value = ''
+  renamingPath.value = path
+  renameDraft.value = path
+}
+
+function cancelRename() {
+  renamingPath.value = ''
+  renameDraft.value = ''
+}
+
+function confirmRename() {
+  const from = renamingPath.value
+  if (!from || from === 'SKILL.md') return
+  const next = normalizeNewPath(renameDraft.value)
+  if (!next) {
+    err.value = '请输入文件路径'
+    return
+  }
+  if (next.toLowerCase() === 'skill.md') {
+    err.value = '不能重命名为 SKILL.md'
+    return
+  }
+  if (next.includes('..')) {
+    err.value = '非法文件路径'
+    return
+  }
+  if (
+    next.toLowerCase() !== from.toLowerCase() &&
+    companionFiles.value.some((f) => f.path.toLowerCase() === next.toLowerCase())
+  ) {
+    err.value = '文件已存在'
+    return
+  }
+  companionFiles.value = companionFiles.value.map((f) =>
+    f.path === from ? { ...f, path: next } : f,
+  )
+  if (selectedFile.value === from) selectedFile.value = next
+  markFilesDirty()
+  renamingPath.value = ''
+  renameDraft.value = ''
+  err.value = ''
 }
 
 function startCreateFile() {
@@ -249,7 +309,7 @@ function confirmCreateFile() {
   markFilesDirty()
   creatingFile.value = false
   newFilePath.value = ''
-  selectFile(path)
+  selectFile(path, 'edit')
   err.value = ''
 }
 
@@ -285,7 +345,7 @@ function discardFileChanges() {
   ) {
     selectedFile.value = 'SKILL.md'
   }
-  fileMode.value = isMainFile.value ? 'preview' : 'edit'
+  fileMode.value = 'preview'
   okMsg.value = ''
 }
 
@@ -309,7 +369,7 @@ async function saveAllFiles() {
     hydrateFiles(skill.value)
     contentDirty.value = false
     okMsg.value = '已保存文件修改'
-    if (isMainFile.value) fileMode.value = 'preview'
+    fileMode.value = 'preview'
   } catch (e) {
     err.value = e instanceof Error ? e.message : '保存失败'
   } finally {
@@ -521,41 +581,134 @@ onMounted(load)
             <div class="aside-scroll">
               <div class="file-group">
                 <div class="file-group-title">主文件</div>
-                <button
-                  type="button"
-                  class="file-item"
-                  :class="{ on: selectedFile === 'SKILL.md' }"
+                <div
+                  class="file-row"
+                  :class="{ on: selectedFile === 'SKILL.md', 'menu-open': fileMenuOpenId === 'SKILL.md' }"
                   @click="selectFile('SKILL.md')"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                    />
-                  </svg>
-                  SKILL.md
-                </button>
+                  <span class="file-item-main">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path
+                        d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                      />
+                    </svg>
+                    SKILL.md
+                  </span>
+                  <div class="file-row-more" @click.stop>
+                    <MoreMenu
+                      :open="fileMenuOpenId === 'SKILL.md'"
+                      @update:open="(v) => setFileMenuOpen('SKILL.md', v)"
+                    >
+                      <template #default="{ close }">
+                        <button type="button" @click="close(); editFileFromMenu('SKILL.md')">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path
+                              d="M4 20h4l10-10-4-4L4 16v4z"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linejoin="round"
+                            />
+                            <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.5" />
+                          </svg>
+                          编辑
+                        </button>
+                      </template>
+                    </MoreMenu>
+                  </div>
+                </div>
               </div>
               <div class="file-group">
                 <div class="file-group-title">附属文件 {{ companionCount }}</div>
-                <button
-                  v-for="f in companionFiles"
-                  :key="f.path"
-                  type="button"
-                  class="file-item"
-                  :class="{ on: selectedFile === f.path }"
-                  @click="selectFile(f.path)"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
-                      stroke="currentColor"
-                      stroke-width="1.5"
+                <template v-for="f in companionFiles" :key="f.path">
+                  <div
+                    v-if="renamingPath === f.path"
+                    class="rename-form"
+                    @click.stop
+                  >
+                    <input
+                      v-model="renameDraft"
+                      type="text"
+                      class="new-file-input"
+                      @keydown.enter.prevent="confirmRename"
+                      @keydown.escape.prevent="cancelRename"
                     />
-                  </svg>
-                  <span class="file-name">{{ f.path }}</span>
-                </button>
+                    <div class="new-file-actions">
+                      <button type="button" class="btn-add sm" @click="confirmRename">确定</button>
+                      <button type="button" class="btn-ghost sm" @click="cancelRename">取消</button>
+                    </div>
+                  </div>
+                  <div
+                    v-else
+                    class="file-row"
+                    :class="{ on: selectedFile === f.path, 'menu-open': fileMenuOpenId === f.path }"
+                    @click="selectFile(f.path)"
+                  >
+                    <span class="file-item-main">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path
+                          d="M7 4h7l3 3v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                        />
+                      </svg>
+                      <span class="file-name">{{ f.path }}</span>
+                    </span>
+                    <div class="file-row-more" @click.stop>
+                      <MoreMenu
+                        :open="fileMenuOpenId === f.path"
+                        @update:open="(v) => setFileMenuOpen(f.path, v)"
+                      >
+                        <template #default="{ close }">
+                          <button type="button" @click="close(); editFileFromMenu(f.path)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M4 20h4l10-10-4-4L4 16v4z"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linejoin="round"
+                              />
+                              <path d="M13 7l4 4" stroke="currentColor" stroke-width="1.5" />
+                            </svg>
+                            编辑
+                          </button>
+                          <button type="button" @click="close(); startRename(f.path)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M5 16l-1 4 4-1L20 7l-3-3L5 16z"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linejoin="round"
+                              />
+                              <path
+                                d="M14 6l3 3"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linecap="round"
+                              />
+                              <path
+                                d="M4 20h16"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linecap="round"
+                              />
+                            </svg>
+                            重命名
+                          </button>
+                          <button
+                            type="button"
+                            class="danger"
+                            @click="close(); askDeleteCompanion(f.path)"
+                          >
+                            <ActionIcon name="delete" />
+                            删除
+                          </button>
+                        </template>
+                      </MoreMenu>
+                    </div>
+                  </div>
+                </template>
                 <p v-if="!companionFiles.length && !creatingFile" class="file-empty">暂无附属文件。</p>
               </div>
 
@@ -580,7 +733,8 @@ onMounted(load)
                 class="btn-new-file"
                 @click="startCreateFile"
               >
-                + 新建文件
+                <ActionIcon name="assign" :size="14" />
+                添加文件
               </button>
             </div>
           </template>
@@ -649,30 +803,28 @@ onMounted(load)
             <div class="file-toolbar">
               <strong class="file-title">{{ selectedFile }}</strong>
               <div class="file-toolbar-right">
-                <template v-if="isMainFile">
-                  <div class="mode-toggle" role="tablist" aria-label="文件模式">
-                    <button
-                      type="button"
-                      role="tab"
-                      :aria-selected="fileMode === 'preview'"
-                      :class="{ on: fileMode === 'preview' }"
-                      @click="setFileMode('preview')"
-                    >
-                      预览
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      :aria-selected="fileMode === 'edit'"
-                      :class="{ on: fileMode === 'edit' }"
-                      @click="setFileMode('edit')"
-                    >
-                      编辑
-                    </button>
-                  </div>
-                </template>
+                <div class="mode-toggle" role="tablist" aria-label="文件模式">
+                  <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="fileMode === 'preview'"
+                    :class="{ on: fileMode === 'preview' }"
+                    @click="setFileMode('preview')"
+                  >
+                    预览
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    :aria-selected="fileMode === 'edit'"
+                    :class="{ on: fileMode === 'edit' }"
+                    @click="setFileMode('edit')"
+                  >
+                    编辑
+                  </button>
+                </div>
                 <button
-                  v-else
+                  v-if="!isMainFile"
                   type="button"
                   class="icon-btn danger sm"
                   title="删除文件"
@@ -684,9 +836,7 @@ onMounted(load)
               </div>
             </div>
 
-            <template v-if="isMainFile && fileMode === 'preview'">
-              <div class="md-preview" v-html="previewHtml" />
-            </template>
+            <div v-if="fileMode === 'preview'" class="md-preview" v-html="previewHtml" />
             <div v-else class="edit-pane">
               <textarea
                 v-if="isMainFile"
@@ -703,15 +853,15 @@ onMounted(load)
                 spellcheck="false"
                 @input="updateCompanionContent(($event.target as HTMLTextAreaElement).value)"
               />
-              <div v-if="hasFileChanges" class="edit-actions">
-                <span class="dirty-hint">已修改: {{ dirtyFileCount }} 个文件</span>
-                <button type="button" class="btn-ghost" :disabled="busy" @click="discardFileChanges">
-                  丢弃
-                </button>
-                <button type="button" class="btn-add" :disabled="busy" @click="saveAllFiles">
-                  {{ busy ? '保存中…' : '保存修改' }}
-                </button>
-              </div>
+            </div>
+            <div v-if="hasFileChanges" class="edit-actions">
+              <span class="dirty-hint">已修改: {{ dirtyFileCount }} 个文件</span>
+              <button type="button" class="btn-ghost" :disabled="busy" @click="discardFileChanges">
+                丢弃
+              </button>
+              <button type="button" class="btn-add" :disabled="busy" @click="saveAllFiles">
+                {{ busy ? '保存中…' : '保存修改' }}
+              </button>
             </div>
           </template>
         </div>
@@ -974,28 +1124,52 @@ input, textarea {
   margin-bottom: 6px;
   padding: 0 6px;
 }
-.file-item {
-  width: 100%;
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  padding: 4px 4px 4px 10px;
+  cursor: pointer;
+  color: var(--text);
+}
+.file-row:hover,
+.file-row.menu-open {
+  background: #eef2f7;
+}
+.file-row.on {
+  background: #e8eef5;
+}
+.file-item-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  padding: 8px 10px;
-  font: inherit;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
+  padding: 4px 0;
 }
-.file-item:hover { background: #f3f4f6; }
-.file-item.on { background: #eef2f7; }
 .file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.file-row-more {
+  flex-shrink: 0;
+}
+.file-row :deep(.more-btn) {
+  opacity: 0;
+  pointer-events: none;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+}
+.file-row:hover :deep(.more-btn),
+.file-row.menu-open :deep(.more-btn),
+.file-row :deep(.more-btn[aria-expanded='true']) {
+  opacity: 1;
+  pointer-events: auto;
 }
 .file-empty {
   margin: 0;
@@ -1005,6 +1179,9 @@ input, textarea {
 }
 .btn-new-file {
   width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--border);
   background: #fff;
   border-radius: 8px;
@@ -1016,10 +1193,12 @@ input, textarea {
   text-align: left;
 }
 .btn-new-file:hover { background: #f9fafb; }
-.new-file-form {
+.new-file-form,
+.rename-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 4px 0;
 }
 .new-file-input {
   width: 100%;
@@ -1171,6 +1350,8 @@ textarea.content {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: #fafafa;
+  margin-top: auto;
+  flex-shrink: 0;
 }
 .dirty-hint {
   margin-right: auto;
