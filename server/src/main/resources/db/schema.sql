@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS rb_skill (
     id           BIGINT PRIMARY KEY,
     workspace_id BIGINT NOT NULL,
     name         VARCHAR(128) NOT NULL,
-    description  TEXT NULL COMMENT '简介（可从 frontmatter 解析）',
+    description  TEXT NULL COMMENT '简介（可从 frontmatter 解析；TEXT 不宜做前缀索引）',
     content      MEDIUMTEXT NOT NULL,
     source_type  VARCHAR(32) NOT NULL DEFAULT 'manual' COMMENT 'manual|url|runtime',
     source_ref   VARCHAR(512) NULL COMMENT '来源 URL 或运行时路径',
@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS rb_skill (
     created_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     deleted      TINYINT NOT NULL DEFAULT 0,
-    KEY idx_skill_ws (workspace_id),
+    KEY idx_skill_ws_updated (workspace_id, deleted, updated_at, id),
+    KEY idx_skill_ws_name (workspace_id, deleted, name),
+    KEY idx_skill_ws_source (workspace_id, deleted, source_type, updated_at),
     KEY idx_skill_creator (created_by_user_id)
 ) COMMENT='工作区 Skill（任意智能体可挂载）';
 
@@ -73,7 +75,8 @@ CREATE TABLE IF NOT EXISTS rb_agent_skill (
     agent_id   BIGINT NOT NULL,
     skill_id   BIGINT NOT NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    UNIQUE KEY uk_agent_skill (agent_id, skill_id)
+    UNIQUE KEY uk_agent_skill (agent_id, skill_id),
+    KEY idx_agent_skill_skill (skill_id)
 ) COMMENT='Agent-Skill 挂载';
 
 CREATE TABLE IF NOT EXISTS rb_runtime_skill (
@@ -82,15 +85,14 @@ CREATE TABLE IF NOT EXISTS rb_runtime_skill (
     runtime_id   BIGINT NOT NULL,
     daemon_id    VARCHAR(128) NOT NULL DEFAULT '',
     name         VARCHAR(128) NOT NULL,
-    description  VARCHAR(512) NULL,
+    description  TEXT NULL COMMENT '简介（可从 frontmatter 解析）',
     content      MEDIUMTEXT NOT NULL,
     source_path  VARCHAR(512) NOT NULL,
     content_hash VARCHAR(64) NOT NULL DEFAULT '',
     reported_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     deleted      TINYINT NOT NULL DEFAULT 0,
     UNIQUE KEY uk_rt_skill_path (runtime_id, source_path),
-    KEY idx_rt_skill_ws (workspace_id),
-    KEY idx_rt_skill_runtime (runtime_id)
+    KEY idx_rt_skill_ws_rt (workspace_id, runtime_id, name)
 ) COMMENT='Daemon 上报的本机 skill 缓存';
 
 CREATE TABLE IF NOT EXISTS rb_project (
